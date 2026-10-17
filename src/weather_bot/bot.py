@@ -38,9 +38,10 @@ from telegram.ext import (
     filters,
 )
 
+from weather_bot.caption import build_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.render import render_card
-from weather_bot.weather import Forecast, Units, WeatherError, describe, fetch_forecast
+from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
 
 log = logging.getLogger(__name__)
 
@@ -138,11 +139,7 @@ def _keyboard(place: Place, units: Units) -> InlineKeyboardMarkup:
 
 
 def _caption(place: Place, fc: Forecast) -> str:
-    return (
-        f"<b>{place.name}</b> · {round(fc.temperature)}{fc.temp_unit}, "
-        f"{describe(fc.weather_code).lower()}\n"
-        f"<i>Updated {fc.observed_at.strftime('%H:%M')} local time</i>"
-    )
+    return build_caption(place.name, fc)
 
 
 async def _build_card(context: Context, place: Place, units: Units) -> tuple[bytes, Forecast]:
