@@ -1,7 +1,12 @@
-version: "3.3"
 services:
-  jitsimeetbot:
-    image: limpidkzonix/telegram-jitsi-meet:latest
-    restart: always
+  weather-bot:
+    image: ${WEATHER_BOT_IMAGE:-limpidkzonix/telegram-weather-bot:latest}
+    restart: unless-stopped
     environment:
-     - TG_BOT_TOKEN
+      - TG_BOT_TOKEN
+      - DATA_DIR=/data
+    volumes:
+      - weather-bot-data:/data
+
+volumes:
+  weather-bot-data:

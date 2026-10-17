@@ -1,11 +1,12 @@
 {
-    "python.languageServer": "Jedi",
-    "python.formatting.provider": "black",
-    "python.linting.banditEnabled": true,
-    "python.linting.flake8Enabled": true,
-    "python.linting.prospectorEnabled": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"],
     "editor.formatOnSave": true,
     "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.formatOnSave": true,
-    },
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    }
 }

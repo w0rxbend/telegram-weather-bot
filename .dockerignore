@@ -1,0 +1,15 @@
+.git
+.github
+.devcontainer
+.vscode
+.venv
+data
+docs
+tests
+scripts
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.env
+preview.png

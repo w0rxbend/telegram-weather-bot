@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Poetry
+        run: pipx install "poetry>=2.0,<3"
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Lint
+        run: |
+          poetry run ruff check src tests scripts
+          poetry run ruff format --check src tests scripts
+      - name: Test
+        run: poetry run pytest -q
+      - name: Render a sample card
+        run: poetry run python scripts/preview.py --fixture tests/fixtures/forecast.json --out preview.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview
+          path: preview.png

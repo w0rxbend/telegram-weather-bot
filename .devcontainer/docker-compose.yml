@@ -1,18 +1,12 @@
-version: '3.8'
-
 services:
   app:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-
     volumes:
-      - ../../telegram-jitsi-meet:/workspaces/telegram-jitsi-meet:cached
-
+      - ../../telegram-weather-bot:/workspaces/telegram-weather-bot:cached
+    env_file:
+      - path: ../.env
+        required: false
     # Overrides default command so things don't shut down after the process ends.
     command: sleep infinity
-
-
-
-volumes:
-  postgres-data:

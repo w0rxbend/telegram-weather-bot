@@ -21,27 +21,22 @@ jobs:
             📊 See changes: https://github.com/${{ github.repository }}/commit/${{github.sha}}
       - id: checkout
         name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
-      - id: setup-qume
+      - id: setup-qemu
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
       - id: setup-builder
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          buildkitd-flags: --debug
-      - name: Print Builder Name
-        run: echo ${{ steps.setup-builder.outputs.name }}
+        uses: docker/setup-buildx-action@v3
       - id: build
         name: Build
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
-          no-cache: true
           platforms: linux/amd64,linux/arm64/v8
           context: .
           push: true
@@ -55,17 +50,13 @@ jobs:
             #notifications
             🐳 New image tag published!
 
-             - Image ID: ${{ secrets.DOKER_IMAGE_TAG }} 
+             - Image ID: ${{ secrets.DOKER_IMAGE_TAG }}
              - Image digest: ${{ steps.build.outputs.digest }}
 
-            🐋 See changes: https://hub.docker.com/r/limpidkzonix/telegram-jitsi-meet/tags
-      - name: Print Image Name
-        run: |
-          echo "Image ID: ${{ steps.build.outputs.imageid }} 
-          echo "Image digest : ${{ steps.build.outputs.digest }}
+            🐋 See changes: https://hub.docker.com/r/limpidkzonix/telegram-weather-bot/tags
       - id: deploy
         name: Connect to remote machine and deploy
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -74,10 +65,11 @@ jobs:
           script_stop: true
           script: |
             export TG_BOT_TOKEN=${{ secrets.TG_BOT_TOKEN }}
-            APP_DIR=$PWD/docker-deployments/apps/bots/telegram/telegram-jitsi-meet
+            export WEATHER_BOT_IMAGE=${{ secrets.DOKER_IMAGE_TAG }}
+            APP_DIR=$PWD/docker-deployments/apps/bots/telegram/telegram-weather-bot
             mkdir -p $APP_DIR
             cd $APP_DIR
-            curl -o docker-compose.yaml ${{ secrets.DOCKER_COMPOSE_FILE_URI }}
+            curl -fsSL -o docker-compose.yaml ${{ secrets.DOCKER_COMPOSE_FILE_URI }}
             docker pull ${{ secrets.DOKER_IMAGE_TAG }}
             docker compose up -d
             docker system prune -f
@@ -90,6 +82,4 @@ jobs:
             #notifications
             🚀 Deployed!
 
-            🤖 The application has been re-deployed with the tag `${{ secrets.DOKER_IMAGE_TAG }}`
-
-            Check this out @jitsi_meet_link_generator_bot
+            🌤 telegram-weather-bot has been re-deployed with the tag `${{ secrets.DOKER_IMAGE_TAG }}`

@@ -1,42 +1,39 @@
-FROM limpidkzonix/poetry-builder:latest as builder
+# ---- builder: turn poetry.lock into a pinned requirements.txt ------------------------------
+FROM python:3.13-slim AS builder
 
-# keeps Python from buffering our standard output stream,
-# which means that logs can be delivered to the user quickly.
-ENV PYTHONUNBUFFERED 1
-
-# DEBIAN_FRONTEND=noninteractive prevents the installer from waiting for user input
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Poetry installation path
-ENV POETRY_HOME=/opt/poetry
-
-# The temporary directory used by pip during the installation process is not needed after the installation is complete.
-ENV PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_DEFAULT_TIMEOUT=100 \
-    POETRY_VIRTUALENVS_CREATE=false \
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     POETRY_NO_INTERACTION=1
 
-COPY pyproject.toml ./pyproject.toml
-COPY poetry.lock ./poetry.lock
-RUN poetry export -f requirements.txt --output requirements.txt 
+RUN pip install "poetry>=2.0,<3" poetry-plugin-export
+
+WORKDIR /build
+COPY pyproject.toml poetry.lock ./
+RUN poetry export -f requirements.txt --without-hashes -o requirements.txt
 
 
+# ---- runtime -------------------------------------------------------------------------------
 FROM python:3.13-slim
 
-RUN addgroup --gid 1000 userapp
-RUN adduser --home /home/userapp --gid 1000 --uid 1000 --disabled-password userapp
-USER userapp
+# Unbuffered logs, no .pyc clutter, state in a mountable volume.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DATA_DIR=/data \
+    PYTHONPATH=/app/src
 
-WORKDIR /home/userapp
+RUN addgroup --gid 1000 userapp \
+    && adduser --home /home/userapp --gid 1000 --uid 1000 --disabled-password userapp \
+    && mkdir -p /data && chown userapp:userapp /data
 
-COPY --from=builder requirements.txt ./requirements.txt
+WORKDIR /app
+COPY --from=builder /build/requirements.txt ./requirements.txt
+RUN pip install -r requirements.txt
+
 COPY src/ ./src
 
-ENV PATH="${PATH}:${USER}/.local/bin"
+USER userapp
+VOLUME ["/data"]
 
-RUN pip install --no-cache-dir --user -r requirements.txt
-# 
-# poetry config virtualenvs.create false
-# 
-CMD [ "python", "./src/telegram_jitsi_meet/main.py" ]
+CMD ["python", "-m", "weather_bot"]

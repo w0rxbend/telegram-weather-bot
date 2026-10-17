@@ -1,50 +1,42 @@
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.poetry]
-name = "telegram-jitsi-meet"
-version = "0.1.0"
-description = "Telegram bot that effortlessly crafts exquisite links for Jitsi Meet"
-authors = ["limpid-kzonix <balyszyn@gmail.com>"]
-license = "MIT"
-packages = [
-    { include = "src/telegram_jitsi_meet/**/*.py" }
+[project]
+name = "telegram-weather-bot"
+version = "1.0.0"
+description = "Telegram bot that turns your shared location into a styled weather infographic"
+authors = [{ name = "limpid-kzonix", email = "balyszyn@gmail.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "python-telegram-bot>=22.0,<23.0",
+    "python-dotenv>=1.0.0,<2.0",
+    "httpx>=0.27,<1.0",
+    "pillow>=11.0,<14.0",
 ]
 
-[tool.poetry.scripts]
-start = "src.telegram_jitsi_meet.main:start"
+[project.scripts]
+weather-bot = "weather_bot.main:start"
 
-[tool.poetry.dependencies] # The main dependencies of your project go here
-python = "^3.10"
-python-telegram-bot = "^20.3"
-python-dotenv = "^1.0.0"
-
-# ------------------ Optional test dependencies ------------------
-
-[tool.poetry.group.test]  # This part can be left out
-
-[tool.poetry.group.test.dependencies]
-pytest = "^6.0.0"
-pytest-mock = "*"
-
-# ------------------ Optional dev dependencies ------------------
-
-[tool.poetry.group.dev]  # This part can be left out
+[tool.poetry]
+packages = [{ include = "weather_bot", from = "src" }]
+include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }]
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^6.0.0"
-pytest-mock = "*"
+pytest = ">=8.0"
+pytest-asyncio = ">=0.24"
+ruff = ">=0.6"
 
-# ------------------ Optional docs dependencies ------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
 
-[tool.poetry.group.docs]
-optional = true
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
 
-[tool.poetry.group.docs.dependencies]
-mkdocs = "*"
-
-
-
-
-
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
