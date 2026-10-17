@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 name = "telegram-weather-bot"
 version = "1.0.0"
 description = "Telegram bot that turns your shared location into a styled weather infographic"
-authors = [{ name = "limpid-kzonix", email = "balyszyn@gmail.com" }]
+authors = [{ name = "w0rxbend", email = "balyszyn@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.11,<4.0"

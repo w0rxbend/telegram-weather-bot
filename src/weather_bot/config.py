@@ -36,6 +36,6 @@ def load_settings() -> Settings:
         http_timeout=float(os.getenv("HTTP_TIMEOUT", "15")),
         user_agent=os.getenv(
             "USER_AGENT",
-            "telegram-weather-bot/1.0 (+https://github.com/limpid-kzonix/telegram-weather-bot)",
+            "telegram-weather-bot/1.0 (+https://github.com/w0rxbend/telegram-weather-bot)",
         ),
     )

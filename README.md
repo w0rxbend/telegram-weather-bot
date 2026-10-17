@@ -63,6 +63,23 @@ poetry run weather-bot          # or: poetry run python -m weather_bot
 | `DATA_DIR` | `./data` (`/data` in Docker) | Directory for the persistence file |
 | `HTTP_TIMEOUT` | `15` | Seconds to wait for weather / geocoding requests |
 | `USER_AGENT` | `telegram-weather-bot/1.0 (+repo url)` | Sent to Open-Meteo and Nominatim. Change it if you fork. |
+| `BOT_NAME` | `Weather Card Bot` | Bot name, applied on startup through the Bot API |
+| `BOT_SHORT_DESCRIPTION` | *(see `identity.py`)* | "About" text shown in the profile |
+| `BOT_DESCRIPTION` | *(see `identity.py`)* | Text shown before the chat starts |
+
+On every start the bot syncs its name, descriptions and command list with Telegram, so the
+profile stays in step with the code. The profile picture is the one thing the Bot API cannot
+set: upload `docs/avatar.png` with `/setuserpic` in @BotFather (regenerate it with
+`python scripts/avatar.py`).
+
+### Deployment pipeline
+
+`.github/workflows/docker-ci.yml` runs on every push to `main`: it builds a multi-arch image,
+pushes it to Docker Hub as `<DOCKERHUB_USERNAME>/telegram-weather-bot:latest`, copies
+`docker-compose.yaml` to the server over SCP and runs `docker compose up -d` there.
+Secrets it needs: `DOCKERHUB_USERNAME`, `DOCKERHUB_PASSWORD`, `SSH_HOST`, `SSH_USERNAME`,
+`SSH_KEY`, `SSH_PORT`, `TG_BOT_TOKEN`, and `TELEGRAM_NOTIFY_CHAT` / `TELEGRAM_NOTIFY_TOKEN`
+for the status messages.
 
 ## Development
 

@@ -18,7 +18,6 @@ from typing import Any
 
 import httpx
 from telegram import (
-    BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -40,6 +39,7 @@ from telegram.ext import (
 
 from weather_bot.caption import build_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
+from weather_bot.identity import sync_identity
 from weather_bot.render import render_card
 from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
 
@@ -345,20 +345,13 @@ async def on_error(update: object, context: Context) -> None:
 
 # --- wiring ------------------------------------------------------------------------------
 
-COMMANDS = [
-    BotCommand("weather", "Fresh weather infographic"),
-    BotCommand("setup", "Change your saved location"),
-    BotCommand("units", "Switch °C / °F"),
-    BotCommand("help", "How to use the bot"),
-]
-
 
 def make_post_init(
     http_factory: Callable[[], httpx.AsyncClient],
 ) -> Callable[[Application], Awaitable[None]]:
     async def post_init(app: Application) -> None:
         app.bot_data["http"] = http_factory()
-        await app.bot.set_my_commands(COMMANDS)
+        await sync_identity(app.bot)
 
     return post_init
 
