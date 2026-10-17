@@ -3,6 +3,7 @@ name: Docker Image CI
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:  # manual redeploy from the Actions tab (e.g. after rotating TG_BOT_TOKEN)
 
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot:latest
