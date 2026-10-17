@@ -220,7 +220,7 @@ def _hero(c: Canvas, fc: Forecast) -> None:
     c.icon(kind, fc.is_day, 320, WIDTH - PAD - 320, 165)
 
 
-def _stats(c: Canvas, fc: Forecast) -> None:
+def _stats(c: Canvas, fc: Forecast, now: datetime) -> None:
     today = fc.today
     tiles = [
         (
@@ -238,12 +238,6 @@ def _stats(c: Canvas, fc: Forecast) -> None:
             f"{today.precipitation_sum:.1f} {fc.precip_unit} today",
         ),
         ("PRESSURE", f"{fc.pressure:.0f}", "hPa", pressure_label(fc.pressure)),
-        (
-            "SUNRISE",
-            today.sunrise.strftime("%H:%M"),
-            "",
-            f"Sunset {today.sunset.strftime('%H:%M')}",
-        ),
     ]
     cols = 3
     gap = 16
@@ -260,6 +254,48 @@ def _stats(c: Canvas, fc: Forecast) -> None:
         if unit:
             c.text(x0 + 22 + adv + 6, y0 + 84, unit, "medium", 20, alpha=0.75, anchor="ls")
         c.text(x0 + 22, y0 + 110, sub, "regular", 19, alpha=0.62, anchor="ls")
+
+    # sixth tile: sun path
+    x0 = PAD + 2 * (tw + gap)
+    y0 = top + th + gap
+    _sun_tile(c, fc, now, x0, y0, tw, th)
+
+
+def _sun_tile(
+    c: Canvas, fc: Forecast, now: datetime, x0: float, y0: float, tw: float, th: float
+) -> None:
+    from weather_bot.render.sunpath import draw_sun_path
+    from weather_bot.sun import fmt_duration, sun_info
+
+    info = sun_info(fc, now)
+    c.glass(x0, y0, x0 + tw, y0 + th)
+    c.text(x0 + 22, y0 + 20, "SUN", "medium", 18, alpha=0.62, tracking=1.6)
+    c.text(
+        x0 + tw - 22, y0 + 20, fmt_duration(info.daylight), "medium", 18, alpha=0.62, anchor="ra"
+    )
+    horizon = y0 + th - 30
+    draw_sun_path(
+        c,
+        info,
+        x0 + tw / 2,
+        horizon,
+        58,
+        stroke=3,
+        sun_radius=7,
+        night_ry_ratio=0.3,
+        horizon_half_width=tw / 2 - 22,
+    )
+    c.text(
+        x0 + 22, horizon + 20, f"↑ {info.sunrise.strftime('%H:%M')}", "semibold", 18, anchor="ls"
+    )
+    c.text(
+        x0 + tw - 22,
+        horizon + 20,
+        f"↓ {info.sunset.strftime('%H:%M')}",
+        "semibold",
+        18,
+        anchor="rs",
+    )
 
 
 def _section_title(c: Canvas, y: float, title: str, note: str | None = None) -> None:
@@ -446,7 +482,7 @@ def render_image(fc: Forecast, place_name: str, now: datetime | None = None) -> 
 
     _header(c, fc, place_name, now)
     _hero(c, fc)
-    _stats(c, fc)
+    _stats(c, fc, now)
     _hourly(c, fc)
     _daily(c, fc)
     _footer(c, fc, now)

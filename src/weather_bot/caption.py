@@ -6,9 +6,11 @@ with the main conditions, one line of key metrics, and a short outlook for the n
 
 from __future__ import annotations
 
+from datetime import datetime
 from html import escape
 
 from weather_bot.render.theme import uv_label
+from weather_bot.sun import fmt_change, fmt_duration, sun_info
 from weather_bot.weather import DayPoint, Forecast, IconKind, compass, describe, icon_kind
 
 CAPTION_LIMIT = 1024
@@ -78,6 +80,39 @@ def build_caption(place_name: str, fc: Forecast, outlook_days: int = 4) -> str:
     lines.append("")
     lines.append(f"<i>🕒 Updated {fc.observed_at.strftime('%H:%M')} · {escape(fc.timezone)}</i>")
 
+    caption = "\n".join(lines)
+    if len(caption) > CAPTION_LIMIT:
+        caption = caption[: CAPTION_LIMIT - 1] + "…"
+    return caption
+
+
+def build_sun_caption(place_name: str, fc: Forecast, now: datetime | None = None) -> str:
+    info = sun_info(fc, now)
+    name = escape(place_name)
+    change = fmt_change(info.change_vs_yesterday)
+    daylight = f"☀️ Daylight <b>{fmt_duration(info.daylight)}</b>"
+    if change:
+        daylight += f" ({change})"
+    next_line = f"⏳ {info.next_event.capitalize()} in {fmt_duration(info.time_to_next_event)}"
+    ge0, ge1 = info.golden_evening
+    lines = [
+        f"🌇 <b>{name}</b>",
+        f"🌅 Sunrise <b>{info.sunrise.strftime('%H:%M')}</b>  ·  "
+        f"🌇 Sunset <b>{info.sunset.strftime('%H:%M')}</b>",
+        daylight,
+        f"🕛 Solar noon {info.solar_noon.strftime('%H:%M')}  ·  "
+        f"✨ Golden hour {ge0.strftime('%H:%M')}–{ge1.strftime('%H:%M')}",
+        next_line,
+    ]
+    upcoming = fc.daily[1:4]
+    if upcoming:
+        lines.append("")
+        lines.append("📅 <b>Next days</b>")
+        for d in upcoming:
+            rise, sset = d.sunrise.strftime("%H:%M"), d.sunset.strftime("%H:%M")
+            lines.append(f"{d.date.strftime('%a')} 🌅 {rise} 🌇 {sset}")
+    lines.append("")
+    lines.append(f"<i>🕒 Updated {fc.observed_at.strftime('%H:%M')} · {escape(fc.timezone)}</i>")
     caption = "\n".join(lines)
     if len(caption) > CAPTION_LIMIT:
         caption = caption[: CAPTION_LIMIT - 1] + "…"

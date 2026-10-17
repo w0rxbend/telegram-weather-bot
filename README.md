@@ -5,20 +5,26 @@
 </p>
 
 <p align="center">
-  <img src="docs/preview-day.png" width="360" alt="Day card: showers in Kyiv" />
-  &nbsp;&nbsp;
-  <img src="docs/preview-night.png" width="360" alt="Night card: overcast in Kyiv" />
+  <img src="docs/preview-day.png" width="300" alt="Day card: showers in Kyiv" />
+  &nbsp;
+  <img src="docs/preview-night.png" width="300" alt="Night card: overcast in Kyiv" />
+  &nbsp;
+  <img src="docs/preview-sun.png" width="300" alt="Sun card: sunrise, sunset and daylight" />
 </p>
 
 ## What it does
 
 1. `/start` – the bot asks for your location with Telegram's **📍 Share my location** button
    (or you can type a city name, handy on Telegram Desktop).
-2. The location is saved per user and turned into a place name.
+2. The location is saved per user as slot 1 and turned into a place name. Save more with
+   `/add` (speed dial: up to 10 slots, one of them the default).
 3. You get a PNG card with the current conditions, a 24-hour temperature curve with rain
-   probability, and a 7-day outlook, themed by weather and time of day.
+   probability, a sun-path tile and a 7-day outlook, themed by weather and time of day.
+   The caption repeats the key numbers as formatted text with emoji.
 4. `/weather` – or the **🔄 Refresh** button under the picture – re-renders a fresh card.
    Refresh replaces the photo in place, so the chat stays tidy.
+5. `/sun` – a dedicated sunrise/sunset card: sun position on its arc, daylight length and its
+   change versus yesterday, solar noon, golden hours, and a 7-day sunrise/sunset strip.
 
 Everything is drawn with Pillow; no browser, no image assets, no API keys.
 
@@ -26,12 +32,20 @@ Everything is drawn with Pillow; no browser, no image assets, no API keys.
 
 | Command | What it does |
 | --- | --- |
-| `/start` | Welcome + location setup |
-| `/weather` (`/now`, `/w`) | Fresh infographic for your saved location |
-| `/setup` | Change the saved location |
-| `/units` | Toggle °C / km/h ↔ °F / mph (also available as a button under each card) |
+| `/start` | Welcome + first location |
+| `/weather` (`/now`, `/w`) | Weather card for your default location |
+| `/weather 2` · `/weather home` | Weather card for slot 2, or for the slot called "home" |
+| `/sun` (`/sunset`, `/sunrise`) | Sunrise & sunset card; takes the same slot argument |
+| `/locations` (`/list`) | Your slots, with buttons to fetch, make default or remove |
+| `/add [name]` | Save another location (share it or type a city), optionally naming the slot |
+| `/default N` · `/rename N name` · `/remove N` | Manage slots by number |
+| `/units` | Toggle °C / km/h ↔ °F / mph (also a button under each card) |
 | `/help` | Command list |
-| *any text* | One-off card for that city; your saved location stays unchanged |
+| *any text* | One-off card for that city; your slots stay unchanged |
+
+Buttons under a weather card: **🔄 Refresh**, **°C/°F**, **🌅 Sun card**, **📍 My locations**.
+Under a sun card: **🔄 Refresh**, **🌤 Weather card**, **📍 My locations**. All of them replace
+the current photo in place.
 
 ## Run it
 
@@ -89,6 +103,7 @@ poetry run ruff check . && poetry run ruff format --check .
 poetry run python scripts/preview.py                                  # live card for Kyiv -> preview.png
 poetry run python scripts/preview.py 51.5 -0.12 London --units imperial
 poetry run python scripts/preview.py --fixture tests/fixtures/forecast.json
+poetry run python scripts/preview.py --sun                                    # sun card
 ```
 
 `scripts/preview.py` is the fastest way to iterate on the design: it renders a card without
@@ -99,12 +114,18 @@ Telegram. `tests/make_fixture.py` regenerates the deterministic sample forecast 
 ```
 src/weather_bot/
 ├── main.py          entry point, wires PTB Application + persistence
-├── bot.py           Telegram handlers (setup, /weather, refresh / units buttons)
+├── bot.py           Telegram handlers (slots, /weather, /sun, inline buttons)
+├── locations.py     per-user saved locations ("speed dial") stored in user_data
+├── caption.py       emoji captions for both cards
+├── identity.py      syncs bot name / descriptions / commands with Telegram
+├── sun.py           sunrise / sunset arithmetic
 ├── config.py        environment settings
 ├── weather.py       Open-Meteo client, Forecast model, WMO code mapping
 ├── geocode.py       Nominatim reverse geocoding, Open-Meteo city search
 ├── render/
-│   ├── card.py      layout + composition of the infographic
+│   ├── card.py      layout + composition of the weather card
+│   ├── sun_card.py  the sunrise / sunset card
+│   ├── sunpath.py   sun-arc graphic shared by both cards
 │   ├── icons.py     procedurally drawn weather icons
 │   ├── theme.py     palettes per condition/day-night, temperature colour ramp
 │   └── fonts.py     bundled Inter font loader

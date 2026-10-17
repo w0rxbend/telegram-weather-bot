@@ -89,11 +89,16 @@ class Forecast:
     wind_direction: int
     wind_gusts: float
     hourly: list[HourPoint] = field(default_factory=list)
-    daily: list[DayPoint] = field(default_factory=list)
+    daily: list[DayPoint] = field(default_factory=list)  # starts with today
+    yesterday: DayPoint | None = None
 
     @property
     def today(self) -> DayPoint:
         return self.daily[0]
+
+    @property
+    def tomorrow(self) -> DayPoint | None:
+        return self.daily[1] if len(self.daily) > 1 else None
 
     @property
     def temp_unit(self) -> str:
@@ -216,6 +221,7 @@ def build_params(latitude: float, longitude: float, units: Units) -> dict[str, A
         "daily": ",".join(DAILY_FIELDS),
         "timezone": "auto",
         "forecast_days": 7,
+        "past_days": 1,
     }
     if units == "imperial":
         params.update(
@@ -299,8 +305,8 @@ def parse_forecast(payload: dict[str, Any], units: Units) -> Forecast:
                 weather_code=int(code),
                 t_max=float(tmax),
                 t_min=float(tmin),
-                sunrise=_ts(rise),
-                sunset=_ts(sset),
+                sunrise=_ts(rise or f"{d}T00:00"),
+                sunset=_ts(sset or f"{d}T00:00"),
                 uv_index_max=float(uv or 0),
                 precipitation_probability_max=int(prob or 0),
                 precipitation_sum=float(psum or 0),
@@ -323,13 +329,19 @@ def parse_forecast(payload: dict[str, Any], units: Units) -> Forecast:
         if not daily_points or not hourly_points:
             raise WeatherError("Open-Meteo returned an empty forecast")
 
+        observed_at = _ts(cur["time"])
+        past = [d for d in daily_points if d.date.date() < observed_at.date()]
+        daily_points = [d for d in daily_points if d.date.date() >= observed_at.date()]
+        if not daily_points:
+            raise WeatherError("Open-Meteo forecast does not cover today")
+
         return Forecast(
             latitude=float(payload["latitude"]),
             longitude=float(payload["longitude"]),
             timezone=str(payload.get("timezone", "UTC")),
             utc_offset=timedelta(seconds=int(payload.get("utc_offset_seconds", 0))),
             units=units,
-            observed_at=_ts(cur["time"]),
+            observed_at=observed_at,
             temperature=float(cur["temperature_2m"]),
             apparent_temperature=float(cur["apparent_temperature"]),
             humidity=int(cur["relative_humidity_2m"]),
@@ -343,6 +355,7 @@ def parse_forecast(payload: dict[str, Any], units: Units) -> Forecast:
             wind_gusts=float(cur.get("wind_gusts_10m") or 0),
             hourly=hourly_points,
             daily=daily_points,
+            yesterday=past[-1] if past else None,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise WeatherError(f"Unexpected Open-Meteo payload: {exc!r}") from exc

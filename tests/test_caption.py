@@ -52,3 +52,18 @@ def test_caption_without_outlook(forecast: Forecast) -> None:
     fc = replace(forecast, daily=forecast.daily[:1])
     caption = build_caption("Somewhere", fc)
     assert "Next days" not in caption
+
+
+def test_sun_caption(forecast: Forecast) -> None:
+    from datetime import datetime
+
+    from weather_bot.caption import build_sun_caption
+
+    caption = build_sun_caption("Kyiv, Ukraine", forecast, datetime(2026, 10, 17, 14, 15))
+    assert caption.startswith("🌇 <b>Kyiv, Ukraine</b>")
+    assert "🌅 Sunrise <b>07:12</b>" in caption and "🌇 Sunset <b>17:59</b>" in caption
+    assert "☀️ Daylight <b>10h 47m</b>" in caption
+    assert "✨ Golden hour 16:59–17:59" in caption
+    assert "⏳ Sunset in 3h 44m" in caption
+    assert "Sun 🌅 07:13 🌇 17:57" in caption
+    assert len(caption) <= CAPTION_LIMIT

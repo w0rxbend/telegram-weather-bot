@@ -22,17 +22,24 @@ DEFAULT_SHORT_DESCRIPTION = (
 DEFAULT_DESCRIPTION = (
     "Share your location once and I'll turn it into a beautiful weather card: current "
     "conditions, a 24-hour temperature curve with rain chances and a 7-day outlook.\n\n"
-    "/weather – fresh card for your location\n"
-    "/setup – change location\n"
+    "/weather – fresh card for your default location\n"
+    "/weather 2 – card for saved slot 2 (speed dial)\n"
+    "/sun – sunrise & sunset card\n"
+    "/locations – your saved places\n"
+    "/add – save another place\n"
     "/units – °C / °F\n\n"
     "Weather data by Open-Meteo.com"
 )
 
 COMMANDS = [
-    BotCommand("weather", "Fresh weather infographic"),
-    BotCommand("setup", "Change your saved location"),
+    BotCommand("weather", "Card for your default location (or /weather 2)"),
+    BotCommand("sun", "Sunrise & sunset card"),
+    BotCommand("locations", "Your saved locations"),
+    BotCommand("add", "Save another location"),
+    BotCommand("default", "Make a slot the default: /default 2"),
+    BotCommand("remove", "Delete a slot: /remove 2"),
     BotCommand("units", "Switch °C / °F"),
-    BotCommand("help", "How to use the bot"),
+    BotCommand("help", "All commands"),
 ]
 
 

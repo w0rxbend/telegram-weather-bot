@@ -96,3 +96,16 @@ def test_uv_label() -> None:
     assert uv_label(0) == "Low"
     assert uv_label(5.9) == "Moderate"
     assert uv_label(11) == "Extreme"
+
+
+def test_sun_card_day_and_night(forecast: Forecast) -> None:
+    from weather_bot.render.sun_card import HEIGHT as SUN_HEIGHT
+    from weather_bot.render.sun_card import render_sun_card, render_sun_image
+
+    png = render_sun_card(forecast, "Kyiv, Ukraine", now=datetime(2026, 10, 17, 14, 15))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert Image.open(io.BytesIO(png)).size == (WIDTH, SUN_HEIGHT)
+    night = render_sun_image(forecast, "Kyiv, Ukraine", now=datetime(2026, 10, 17, 23, 0))
+    assert night.size == (WIDTH, SUN_HEIGHT)
+    early = render_sun_image(forecast, "Kyiv, Ukraine", now=datetime(2026, 10, 17, 5, 0))
+    assert early.size == (WIDTH, SUN_HEIGHT)

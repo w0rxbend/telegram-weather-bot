@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import httpx  # noqa: E402
 
 from weather_bot.render import render_card  # noqa: E402
+from weather_bot.render.sun_card import render_sun_card  # noqa: E402
 from weather_bot.weather import fetch_forecast, parse_forecast  # noqa: E402
 
 
@@ -31,6 +32,7 @@ async def main() -> None:
     ap.add_argument("name", nargs="?", default="Kyiv, Ukraine")
     ap.add_argument("--units", choices=["metric", "imperial"], default="metric")
     ap.add_argument("--fixture", type=Path, help="Render from a saved Open-Meteo JSON payload")
+    ap.add_argument("--sun", action="store_true", help="Render the sun card instead")
     ap.add_argument("--out", type=Path, default=Path("preview.png"))
     args = ap.parse_args()
 
@@ -42,7 +44,8 @@ async def main() -> None:
         async with httpx.AsyncClient(timeout=20) as client:
             forecast = await fetch_forecast(client, args.lat, args.lon, args.units)
 
-    args.out.write_bytes(render_card(forecast, args.name, now))
+    render = render_sun_card if args.sun else render_card
+    args.out.write_bytes(render(forecast, args.name, now))
     print(f"wrote {args.out} ({args.out.stat().st_size // 1024} KiB)")
 
 
