@@ -37,7 +37,7 @@ def make_update(
 
 def patched(forecast: Forecast):
     return (
-        patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),
+        patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(bot, "render_card", return_value=b"\x89PNGfake"),
     )
 
@@ -227,7 +227,7 @@ async def test_units_callback_toggles_units(forecast: Forecast) -> None:
     query = make_query("u|50.4500|30.5200")
     fetch = AsyncMock(return_value=forecast)
     with (
-        patch.object(bot, "fetch_forecast", fetch),
+        patch.object(bot, "cached_forecast", fetch),
         patch.object(bot, "render_card", return_value=b"png"),
     ):
         await bot.on_card_callback(SimpleNamespace(callback_query=query), ctx)
@@ -266,7 +266,7 @@ async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
     store.add_location(ctx.user_data, KYIV)
     update = make_update()
     with (
-        patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),
+        patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(bot, "render_sun_card", return_value=b"sunpng") as render,
     ):
         await bot.cmd_sun(update, ctx)
@@ -282,7 +282,7 @@ async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
     assert bot._keyboard(KYIV, "metric").inline_keyboard[1][0].callback_data == "s|50.4500|30.5200"
     query = make_query("s|50.4500|30.5200")
     with (
-        patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),
+        patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(bot, "render_sun_card", return_value=b"sunpng"),
     ):
         await bot.on_card_callback(SimpleNamespace(callback_query=query), ctx)
@@ -296,13 +296,13 @@ async def test_schedule_command_presets_custom_and_off(forecast: Forecast) -> No
     update.effective_message.chat_id = 555
 
     # no location yet -> asked to add one
-    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+    with patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)):
         ctx.args = ["7:30"]
         await bot.cmd_schedule(update, ctx)
     assert "Save a location first" in update.effective_message.reply_text.await_args.args[0]
 
     store.add_location(ctx.user_data, KYIV)
-    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+    with patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)):
         ctx.args = []
         await bot.cmd_schedule(update, ctx)  # menu only
         text = update.effective_message.reply_text.await_args.args[0]
@@ -327,7 +327,7 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
     store.add_location(ctx.user_data, KYIV)
     query = make_query("sch|three")
     query.message.chat_id = 555
-    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+    with patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)):
         await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
     assert bot.sched.get_schedule(ctx.user_data).preset == "three"
     query.edit_message_text.assert_awaited_once()
@@ -343,7 +343,7 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
     update = make_update(text="8:00 20:00")
     update.effective_message.chat_id = 555
     with (
-        patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),
+        patch.object(bot, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(bot, "search_place", AsyncMock()) as search,
     ):
         await bot.on_text(update, ctx)

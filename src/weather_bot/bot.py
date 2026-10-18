@@ -49,12 +49,13 @@ from telegram.ext import (
 from weather_bot import locations as store
 from weather_bot import runtime
 from weather_bot import schedule as sched
+from weather_bot.cache import cached_forecast
 from weather_bot.caption import build_caption, build_sun_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.identity import sync_identity
 from weather_bot.locations import MAX_LOCATIONS, SavedLocation
 from weather_bot.render import render_card, render_sun_card
-from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
+from weather_bot.weather import Forecast, Units, WeatherError
 
 log = logging.getLogger(__name__)
 
@@ -215,7 +216,7 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
 async def _build_card(
     place: Place, units: Units, kind: CardKind = "weather"
 ) -> tuple[bytes, Forecast]:
-    forecast = await fetch_forecast(runtime.http(), place.latitude, place.longitude, units)
+    forecast = await cached_forecast(runtime.http(), place.latitude, place.longitude, units)
     render = render_sun_card if kind == "sun" else render_card
     png = await asyncio.to_thread(render, forecast, place.name)
     return png, forecast
@@ -472,7 +473,7 @@ async def _apply_schedule(
     if default is None:
         return "Save a location first (share it or type a city), then set up the schedule."
     try:
-        forecast = await fetch_forecast(
+        forecast = await cached_forecast(
             runtime.http(), default.place.latitude, default.place.longitude
         )
         tz = forecast.timezone

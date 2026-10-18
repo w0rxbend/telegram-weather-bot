@@ -80,10 +80,19 @@ poetry run weather-bot          # or: poetry run python -m weather_bot
 | `TG_BOT_TOKEN` | – | Bot token from [@BotFather](https://t.me/BotFather). Required. |
 | `DATA_DIR` | `./data` (`/data` in Docker) | Directory for the persistence file |
 | `HTTP_TIMEOUT` | `15` | Seconds to wait for weather / geocoding requests |
+| `FORECAST_CACHE_TTL` | `3600` | Seconds a forecast is reused per place (~1 km grid) and units before Open-Meteo is called again |
 | `USER_AGENT` | `telegram-weather-bot/1.0 (+repo url)` | Sent to Open-Meteo and Nominatim. Change it if you fork. |
 | `BOT_NAME` | `Weather Card Bot` | Bot name, applied on startup through the Bot API |
 | `BOT_SHORT_DESCRIPTION` | *(see `identity.py`)* | "About" text shown in the profile |
 | `BOT_DESCRIPTION` | *(see `identity.py`)* | Text shown before the chat starts |
+
+### Forecast cache
+
+Every card, caption, refresh button and scheduled send goes through an in-memory cache keyed by
+rounded coordinates and units. A place is fetched from Open-Meteo at most once per hour (see
+`FORECAST_CACHE_TTL`), concurrent requests for the same place share one call, and if the API is
+down a result up to six hours old is served instead of an error. The free Open-Meteo tier allows
+10 000 calls a day; with the cache, even hourly schedules for hundreds of users stay far below it.
 
 ### Scheduled cards
 
