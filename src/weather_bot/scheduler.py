@@ -14,11 +14,13 @@ import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 
+from weather_bot import health
 from weather_bot import locations as store
 from weather_bot import schedule as sched
 from weather_bot.weather import WeatherError
@@ -30,7 +32,11 @@ MAX_RETRY_AFTER = 60.0  # longest flood-control wait we will sit out inside a ti
 CHAT_GONE = "chat not found"
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:
+async def scheduler_loop(
+    app,
+    interval: float = INTERVAL,
+    heartbeat: Path | None = None,
+) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
@@ -39,6 +45,8 @@ async def scheduler_loop(app, interval: float = INTERVAL) -> None:
             raise
         except Exception:
             log.exception("Scheduler tick failed")
+        if heartbeat is not None:
+            health.beat(heartbeat)
         await asyncio.sleep(interval)
 
 
@@ -119,8 +127,8 @@ async def _send_photo(app, **kwargs: Any) -> None:
         await app.bot.send_photo(**kwargs)
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:
-    return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
+def start(app, interval: float = INTERVAL, heartbeat: Path | None = None) -> asyncio.Task:
+    return asyncio.create_task(scheduler_loop(app, interval, heartbeat), name="weather-scheduler")
 
 
 async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:

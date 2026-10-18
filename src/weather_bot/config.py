@@ -20,6 +20,10 @@ class Settings:
     user_agent: str
 
     @property
+    def heartbeat_file(self) -> Path:
+        return self.data_dir / "heartbeat"
+
+    @property
     def persistence_file(self) -> Path:
         return self.data_dir / "bot_state.pickle"
 

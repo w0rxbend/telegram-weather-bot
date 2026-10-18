@@ -5,6 +5,9 @@ on:
     branches: ["main"]
   workflow_dispatch:  # manual redeploy from the Actions tab (e.g. after rotating TG_BOT_TOKEN)
 
+permissions:
+  contents: read
+
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot:latest
   APP_DIR: docker-deployments/apps/bots/telegram/telegram-weather-bot
@@ -70,6 +73,8 @@ jobs:
           target: ${{ env.APP_DIR }}
       - id: deploy
         name: Connect to remote machine and deploy
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}  # passed via envs:, never pasted into the script
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -77,8 +82,8 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
+          envs: TG_BOT_TOKEN
           script: |
-            export TG_BOT_TOKEN=${{ secrets.TG_BOT_TOKEN }}
             export WEATHER_BOT_IMAGE=${{ env.IMAGE }}
             cd $PWD/${{ env.APP_DIR }}
             docker pull $WEATHER_BOT_IMAGE

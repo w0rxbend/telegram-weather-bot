@@ -52,7 +52,7 @@ def start() -> None:
 
     async def post_init(app) -> None:
         await bot_post_init(app)
-        scheduler_task.append(scheduler.start(app))
+        scheduler_task.append(scheduler.start(app, heartbeat=settings.heartbeat_file))
 
     async def post_stop(app) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
