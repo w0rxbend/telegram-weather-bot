@@ -76,3 +76,34 @@ def test_legacy_single_location_is_migrated() -> None:
     locs = store.list_locations(data)
     assert len(locs) == 1 and locs[0].is_default and locs[0].place == KYIV
     assert "location" not in data
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  home  ", "home"),
+        ("my‮\x00 office\n\tx", "my office x"),
+        ("ｈｏｍｅ", "home"),  # full-width -> NFKC
+        ("x" * 50, "x" * store.MAX_ALIAS_LENGTH),
+        ("​\x07", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_clean_alias(raw: str | None, expected: str | None) -> None:
+    assert store.clean_alias(raw) == expected
+
+
+def test_aliases_are_cleaned_on_add_and_rename() -> None:
+    data: dict = {}
+    loc, _ = store.add_location(data, KYIV, "ho\x00me")
+    assert loc.alias == "home"
+    renamed = store.rename_location(data, 0, " off\x07ice ")
+    assert renamed is not None
+    assert renamed.alias == "office"
+
+
+def test_resolve_ignores_non_ascii_digits() -> None:
+    data: dict = {}
+    store.add_location(data, KYIV)
+    assert store.resolve(data, "²") is None
