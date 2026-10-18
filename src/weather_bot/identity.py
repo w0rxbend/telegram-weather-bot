@@ -25,6 +25,7 @@ DEFAULT_DESCRIPTION = (
     "/weather – fresh card for your default location\n"
     "/weather 2 – card for saved slot 2 (speed dial)\n"
     "/sun – sunrise & sunset card\n"
+    "/schedule – automatic cards every morning, 3× a day, hourly…\n"
     "/locations – your saved places\n"
     "/add – save another place\n"
     "/units – °C / °F\n\n"
@@ -34,6 +35,7 @@ DEFAULT_DESCRIPTION = (
 COMMANDS = [
     BotCommand("weather", "Card for your default location (or /weather 2)"),
     BotCommand("sun", "Sunrise & sunset card"),
+    BotCommand("schedule", "Automatic cards: every morning, 3× a day, hourly…"),
     BotCommand("locations", "Your saved locations"),
     BotCommand("add", "Save another location"),
     BotCommand("default", "Make a slot the default: /default 2"),

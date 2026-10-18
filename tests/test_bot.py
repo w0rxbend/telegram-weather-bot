@@ -288,3 +288,69 @@ async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
         await bot.on_card_callback(SimpleNamespace(callback_query=query), ctx)
     media = query.edit_message_media.await_args.kwargs["media"]
     assert "🌅 Sunrise" in media.caption
+
+
+async def test_schedule_command_presets_custom_and_off(forecast: Forecast) -> None:
+    ctx = make_context()
+    update = make_update()
+    update.effective_message.chat_id = 555
+
+    # no location yet -> asked to add one
+    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+        ctx.args = ["7:30"]
+        await bot.cmd_schedule(update, ctx)
+    assert "Save a location first" in update.effective_message.reply_text.await_args.args[0]
+
+    store.add_location(ctx.user_data, KYIV)
+    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+        ctx.args = []
+        await bot.cmd_schedule(update, ctx)  # menu only
+        text = update.effective_message.reply_text.await_args.args[0]
+        assert "Currently off" in text
+        keyboard = update.effective_message.reply_text.await_args.kwargs["reply_markup"]
+        assert keyboard.inline_keyboard[0][0].callback_data == "sch|morning"
+
+        ctx.args = ["7:30", "18:00"]
+        await bot.cmd_schedule(update, ctx)
+    current = bot.sched.get_schedule(ctx.user_data)
+    assert current.times == ("07:30", "18:00") and current.chat_id == 555
+    assert current.tz == "Europe/Kyiv"
+    assert "Next card" in update.effective_message.reply_text.await_args.args[0]
+
+    ctx.args = ["off"]
+    await bot.cmd_schedule(update, ctx)
+    assert bot.sched.get_schedule(ctx.user_data) is None
+
+
+async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, KYIV)
+    query = make_query("sch|three")
+    query.message.chat_id = 555
+    with patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)):
+        await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
+    assert bot.sched.get_schedule(ctx.user_data).preset == "three"
+    query.edit_message_text.assert_awaited_once()
+
+    query = make_query("sch|days")
+    await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
+    assert bot.sched.get_schedule(ctx.user_data).days == "weekdays"
+
+    query = make_query("sch|custom")
+    await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
+    assert ctx.user_data[bot.sched.KEY_AWAITING_TIMES] is True
+
+    update = make_update(text="8:00 20:00")
+    update.effective_message.chat_id = 555
+    with (
+        patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),
+        patch.object(bot, "search_place", AsyncMock()) as search,
+    ):
+        await bot.on_text(update, ctx)
+    search.assert_not_awaited()  # text went to the schedule, not to city search
+    current = bot.sched.get_schedule(ctx.user_data)
+    assert current.times == ("08:00", "20:00") and current.days == "weekdays"
+
+    query = make_query("sch|off")
+    await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
+    assert bot.sched.get_schedule(ctx.user_data) is None

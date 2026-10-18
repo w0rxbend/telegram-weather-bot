@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 from telegram.ext import ApplicationBuilder, PicklePersistence
 
+from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import load_settings
 
@@ -44,12 +45,23 @@ def start() -> None:
             follow_redirects=True,
         )
 
+    bot_post_init = make_post_init(http_factory)
+    scheduler_task: list = []
+
+    async def post_init(app) -> None:  # noqa: ANN001
+        await bot_post_init(app)
+        scheduler_task.append(scheduler.start(app))
+
+    async def post_stop(app) -> None:  # noqa: ANN001, ARG001
+        await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
+
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
         .persistence(PicklePersistence(filepath=settings.persistence_file))
         .concurrent_updates(True)
-        .post_init(make_post_init(http_factory))
+        .post_init(post_init)
+        .post_stop(post_stop)
         .post_shutdown(post_shutdown)
         .build()
     )

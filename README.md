@@ -25,6 +25,9 @@
    Refresh replaces the photo in place, so the chat stays tidy.
 5. `/sun` – a dedicated sunrise/sunset card: sun position on its arc, daylight length and its
    change versus yesterday, solar noon, golden hours, and a 7-day sunrise/sunset strip.
+6. `/schedule` – automatic cards without asking: every morning, morning & evening, three times
+   a day, hourly 09–21, every 3 hours, or your own times; every day or weekdays only. Times are
+   in your default location's time zone.
 
 Everything is drawn with Pillow; no browser, no image assets, no API keys.
 
@@ -39,6 +42,7 @@ Everything is drawn with Pillow; no browser, no image assets, no API keys.
 | `/locations` (`/list`) | Your slots, with buttons to fetch, make default or remove |
 | `/add [name]` | Save another location (share it or type a city), optionally naming the slot |
 | `/default N` · `/rename N name` · `/remove N` | Manage slots by number |
+| `/schedule` | Menu of notification presets; `/schedule 7:30 18:00` sets custom times, `/schedule off` stops |
 | `/units` | Toggle °C / km/h ↔ °F / mph (also a button under each card) |
 | `/help` | Command list |
 | *any text* | One-off card for that city; your slots stay unchanged |
@@ -81,6 +85,14 @@ poetry run weather-bot          # or: poetry run python -m weather_bot
 | `BOT_SHORT_DESCRIPTION` | *(see `identity.py`)* | "About" text shown in the profile |
 | `BOT_DESCRIPTION` | *(see `identity.py`)* | Text shown before the chat starts |
 
+### Scheduled cards
+
+A background task ticks every 30 seconds, converts the current time into each user's schedule
+time zone and sends the weather card for their default slot when a configured time comes up
+(once per slot per day, with a 10-minute grace window if the bot was briefly down). Schedules
+are stored with the rest of the user state, so they survive restarts. A user who blocks the bot
+or deletes all locations has the schedule removed automatically.
+
 On every start the bot syncs its name, descriptions and command list with Telegram, so the
 profile stays in step with the code. The profile picture is the one thing the Bot API cannot
 set: upload `docs/avatar.png` with `/setuserpic` in @BotFather (regenerate it with
@@ -119,6 +131,9 @@ src/weather_bot/
 ├── caption.py       emoji captions for both cards
 ├── identity.py      syncs bot name / descriptions / commands with Telegram
 ├── sun.py           sunrise / sunset arithmetic
+├── schedule.py      notification presets, custom times, due-slot logic
+├── scheduler.py     background task that sends scheduled cards
+├── runtime.py       process-wide HTTP client (kept out of persisted state)
 ├── config.py        environment settings
 ├── weather.py       Open-Meteo client, Forecast model, WMO code mapping
 ├── geocode.py       Nominatim reverse geocoding, Open-Meteo city search

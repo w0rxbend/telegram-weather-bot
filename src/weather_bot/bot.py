@@ -7,6 +7,7 @@ Flow:
   /weather          -> fresh infographic for the default location
   /weather 2|home   -> ... for slot 2, or the slot named/called "home"
   /sun [slot]       -> sunrise / sunset card for the same slots
+  /schedule         -> automatic cards: presets, custom times, weekdays-only, off
   /locations        -> list of slots with buttons: get weather, make default, remove
   /default N, /remove N, /rename N name
   🔄 Refresh button -> re-fetches and replaces the photo + caption in place
@@ -19,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from html import escape
 from typing import Any, Literal
 
@@ -46,6 +48,7 @@ from telegram.ext import (
 
 from weather_bot import locations as store
 from weather_bot import runtime
+from weather_bot import schedule as sched
 from weather_bot.caption import build_caption, build_sun_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.identity import sync_identity
@@ -71,6 +74,7 @@ CB_WEATHER_SLOT = "w"
 CB_DEFAULT_SLOT = "d"
 CB_REMOVE_SLOT = "x"
 CB_LIST = "l"
+CB_SCHEDULE = "sch"
 
 LOCATION_KEYBOARD = ReplyKeyboardMarkup(
     [[KeyboardButton("📍 Share my location", request_location=True)]],
@@ -98,6 +102,10 @@ HELP = (
     "/default 2 – make slot 2 the default\n"
     "/rename 2 office – give slot 2 a short name\n"
     "/remove 2 – delete slot 2\n\n"
+    "<b>Automatic cards</b>\n"
+    "/schedule – pick when I should send the weather by myself "
+    "(every morning, 3× a day, hourly 9–21, custom times…)\n"
+    "/schedule 7:30 18:00 – custom times · /schedule off – stop\n\n"
     "Typing any city name shows its weather without saving it."
 )
 
@@ -205,9 +213,9 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
 
 
 async def _build_card(
-    context: Context, place: Place, units: Units, kind: CardKind = "weather"
+    place: Place, units: Units, kind: CardKind = "weather"
 ) -> tuple[bytes, Forecast]:
-    forecast = await fetch_forecast(_client(context), place.latitude, place.longitude, units)
+    forecast = await fetch_forecast(runtime.http(), place.latitude, place.longitude, units)
     render = render_sun_card if kind == "sun" else render_card
     png = await asyncio.to_thread(render, forecast, place.name)
     return png, forecast
@@ -225,7 +233,7 @@ async def _send_card(
     units = _units(context)
     await message.chat.send_action(ChatAction.UPLOAD_PHOTO)
     try:
-        png, forecast = await _build_card(context, place, units, kind)
+        png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Forecast failed for %s: %s", place, exc)
         await message.reply_text(
@@ -414,6 +422,150 @@ async def cmd_help(update: Update, context: Context) -> None:
     await message.reply_text(HELP, parse_mode=ParseMode.HTML)
 
 
+# --- schedule ------------------------------------------------------------------------------
+
+
+def _schedule_view(
+    context: Context, now: datetime | None = None
+) -> tuple[str, InlineKeyboardMarkup]:
+    current = sched.get_schedule(context.user_data)
+    default = store.get_default(context.user_data)
+    lines = ["<b>⏰ Automatic weather cards</b>"]
+    if current:
+        lines.append(f"Current: {escape(current.describe())}")
+        nxt = current.next_run(now or datetime.now(UTC))
+        if nxt:
+            lines.append(f"Next card: <b>{nxt.strftime('%a %H:%M')}</b>")
+    else:
+        lines.append("Currently off.")
+    if default:
+        lines.append(f"Location: <b>{escape(default.label)}</b> (your default slot)")
+    lines.append("")
+    lines.append("Pick a preset, or send custom times like <code>/schedule 7:30 18:00</code>.")
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                ("✓ " if current and current.preset == p.key else "") + p.label,
+                callback_data=f"{CB_SCHEDULE}|{p.key}",
+            )
+        ]
+        for p in sched.PRESETS.values()
+    ]
+    rows.append([InlineKeyboardButton("✏️ Custom times…", callback_data=f"{CB_SCHEDULE}|custom")])
+    if current:
+        days_label = "📅 Switch to every day" if current.days == "weekdays" else "📅 Weekdays only"
+        rows.append(
+            [
+                InlineKeyboardButton(days_label, callback_data=f"{CB_SCHEDULE}|days"),
+                InlineKeyboardButton("🔕 Turn off", callback_data=f"{CB_SCHEDULE}|off"),
+            ]
+        )
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+async def _apply_schedule(
+    message: Message, context: Context, *, times: list[str] | tuple[str, ...], preset: str
+) -> str | None:
+    """Store a schedule for this user/chat. Returns an error message, or None on success."""
+    default = store.get_default(context.user_data)
+    if default is None:
+        return "Save a location first (share it or type a city), then set up the schedule."
+    try:
+        forecast = await fetch_forecast(
+            runtime.http(), default.place.latitude, default.place.longitude
+        )
+        tz = forecast.timezone
+    except WeatherError:
+        previous = sched.get_schedule(context.user_data)
+        tz = previous.tz if previous else "UTC"
+    sched.set_schedule(
+        context.user_data, times=times, preset=preset, tz=tz, chat_id=message.chat_id
+    )
+    return None
+
+
+async def cmd_schedule(update: Update, context: Context) -> None:
+    message = update.effective_message
+    assert message is not None
+    arg = _args(context)
+    if arg.lower() in {"off", "stop", "disable"}:
+        removed = sched.clear_schedule(context.user_data)
+        await message.reply_text(
+            "🔕 Automatic cards are off." if removed else "Nothing was scheduled."
+        )
+        return
+    if arg:
+        try:
+            times = sched.parse_times(arg)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+            return
+        error = await _apply_schedule(message, context, times=times, preset="custom")
+        if error:
+            await message.reply_text(error)
+            return
+    text, keyboard = _schedule_view(context)
+    await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+
+async def on_schedule_callback(update: Update, context: Context) -> None:
+    query = update.callback_query
+    assert query is not None
+    message = query.message
+    action = (query.data or "").split("|", 1)[-1]
+    if message is None:
+        await query.answer("This button has expired. Send /schedule instead.")
+        return
+
+    if action == "custom":
+        context.user_data[sched.KEY_AWAITING_TIMES] = True
+        await query.answer()
+        await message.reply_text(  # type: ignore[union-attr]
+            "Send the times you want, separated by spaces, e.g. <code>7:30 13:00 19:00</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if action == "off":
+        sched.clear_schedule(context.user_data)
+        await query.answer("🔕 Turned off")
+    elif action == "days":
+        result = sched.toggle_days(context.user_data)
+        await query.answer("Updated" if result else "Nothing scheduled")
+    elif action in sched.PRESETS:
+        preset = sched.PRESETS[action]
+        error = await _apply_schedule(message, context, times=preset.times, preset=preset.key)  # type: ignore[arg-type]
+        if error:
+            await query.answer(error, show_alert=True)
+            return
+        await query.answer("✓ Scheduled")
+    else:
+        await query.answer()
+        return
+
+    text, keyboard = _schedule_view(context)
+    try:
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+    except BadRequest as exc:
+        if "not modified" not in str(exc).lower():
+            raise
+
+
+async def _on_custom_times(message: Message, context: Context, text: str) -> None:
+    try:
+        times = sched.parse_times(text)
+    except ValueError as exc:
+        await message.reply_text(f"{exc}\nOr send /schedule off to cancel.")
+        return
+    error = await _apply_schedule(message, context, times=times, preset="custom")
+    if error:
+        context.user_data.pop(sched.KEY_AWAITING_TIMES, None)
+        await message.reply_text(error)
+        return
+    view, keyboard = _schedule_view(context)
+    await message.reply_text(view, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+
 # --- message handlers --------------------------------------------------------------------
 
 
@@ -434,6 +586,9 @@ async def on_text(update: Update, context: Context) -> None:
     user = update.effective_user
     assert message is not None and message.text is not None
     query = message.text.strip()
+    if context.user_data.get(sched.KEY_AWAITING_TIMES):
+        await _on_custom_times(message, context, query)
+        return
     if len(query) < 2 or len(query) > 80:
         await message.reply_text("Please send a city name, or share your location with /add.")
         return
@@ -493,7 +648,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
 
     await query.answer("Refreshing…")
     try:
-        png, forecast = await _build_card(context, place, units, kind)
+        png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Refresh failed for %s: %s", place, exc)
         await query.answer(
@@ -604,6 +759,7 @@ def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
     app.add_handler(CommandHandler("default", cmd_default))
     app.add_handler(CommandHandler(["remove", "delete"], cmd_remove))
     app.add_handler(CommandHandler("rename", cmd_rename))
+    app.add_handler(CommandHandler("schedule", cmd_schedule))
     app.add_handler(CommandHandler("units", cmd_units))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.LOCATION, on_location))
@@ -617,4 +773,5 @@ def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
             pattern=rf"^({CB_WEATHER_SLOT}|{CB_DEFAULT_SLOT}|{CB_REMOVE_SLOT}|{CB_LIST})\|",
         )
     )
+    app.add_handler(CallbackQueryHandler(on_schedule_callback, pattern=rf"^{CB_SCHEDULE}\|"))
     app.add_error_handler(on_error)
