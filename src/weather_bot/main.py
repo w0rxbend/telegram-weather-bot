@@ -12,10 +12,11 @@ from telegram.ext import ApplicationBuilder, PicklePersistence
 
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
-from weather_bot.config import load_settings
+from weather_bot.config import Settings, load_settings
 from weather_bot.updates import PerUserUpdateProcessor
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+HTTP_MAX_CONNECTIONS = 20
 log = logging.getLogger(__name__)
 
 
@@ -32,21 +33,25 @@ def quarantine_corrupt_state(path: Path) -> None:
         log.error("State file %s was unreadable (%s); moved to %s", path, exc, backup)
 
 
+def build_http_client(settings: Settings) -> httpx.AsyncClient:
+    """Shared outbound client: bounded pool, no redirects (none of our APIs use them)."""
+    return httpx.AsyncClient(
+        timeout=settings.http_timeout,
+        headers={"User-Agent": settings.user_agent},
+        follow_redirects=False,
+        limits=httpx.Limits(max_connections=HTTP_MAX_CONNECTIONS),
+    )
+
+
 def start() -> None:
     logging.basicConfig(format=LOG_FORMAT, level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     settings = load_settings()
     quarantine_corrupt_state(settings.persistence_file)
 
-    def http_factory() -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            timeout=settings.http_timeout,
-            headers={"User-Agent": settings.user_agent},
-            follow_redirects=True,
-        )
-
-    bot_post_init = make_post_init(http_factory)
+    bot_post_init = make_post_init(lambda: build_http_client(settings))
     scheduler_task: list = []
 
     async def post_init(app) -> None:  # noqa: ANN001
