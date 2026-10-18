@@ -69,3 +69,17 @@ async def test_schedule_without_location_is_cleared() -> None:
     await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC))
     assert sched.get_schedule(data) is None
     app.bot.send_photo.assert_not_awaited()
+
+
+async def test_one_failing_user_does_not_block_others(forecast: Forecast) -> None:
+    first: dict = {}
+    store.add_location(first, KYIV)
+    sched.set_schedule(first, times=["07:30"], preset="morning", tz="Europe/Kyiv", chat_id=1)
+    second: dict = {}
+    store.add_location(second, KYIV)
+    sched.set_schedule(second, times=["07:30"], preset="morning", tz="Europe/Kyiv", chat_id=2)
+    app = make_app({1: first, 2: second})
+    app.bot.send_photo = AsyncMock(side_effect=[RuntimeError("boom"), None])
+    with patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))):
+        assert await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC)) == 1
+    assert app.bot.send_photo.await_count == 2

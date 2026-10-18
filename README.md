@@ -175,6 +175,8 @@ src/weather_bot/
 - City search: [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api).
 - Typeface: [Inter](https://github.com/rsms/inter) by Rasmus Andersson, SIL Open Font License.
 
+See [TODO.md](TODO.md) for the performance, security and robustness review with prioritised next steps.
+
 ## License
 
 MIT

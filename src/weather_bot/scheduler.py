@@ -50,8 +50,11 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
         touched.append(user_id)
         for slot in due:
             sched.mark_sent(data, now, slot)  # mark first: never retry-storm a failing send
-        await _send(app, user_id, data)
-        sent += 1
+        try:
+            await _send(app, user_id, data)
+            sent += 1
+        except Exception:  # noqa: BLE001 - one user's failure must not skip the others
+            log.exception("Scheduled send for user %s failed", user_id)
     if touched:
         app.mark_data_for_update_persistence(user_ids=touched)
         await app.update_persistence()
