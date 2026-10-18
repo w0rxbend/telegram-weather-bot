@@ -41,7 +41,7 @@ machine-checked; reviewers enforce it.
 - **Never log** tokens, message text, full `Update` objects or exact coordinates. Log ids
   (`update_id`, `user_id`) and place names or coordinates rounded to 1 decimal.
   ```python
-  log.error("bad update %s", update)            # bad: dumps text + location
+  log.error("bad update %s", update)  # bad: dumps text + location
   log.error("update %s failed", update.update_id)  # good
   ```
 
