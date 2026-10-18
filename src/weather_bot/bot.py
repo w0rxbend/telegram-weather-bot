@@ -36,7 +36,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -236,7 +236,7 @@ async def _send_card(
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Forecast failed for %s: %s", place, exc)
+        log.warning("Forecast failed: %s", exc)
         await message.reply_text(
             "I couldn't reach the weather service right now. Please try again in a minute.",
             reply_markup=ReplyKeyboardRemove() if intro else None,
@@ -651,7 +651,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Refresh failed for %s: %s", place, exc)
+        log.warning("Refresh failed: %s", exc)
         await query.answer(
             "Weather service is unavailable right now, try again shortly.", show_alert=True
         )
@@ -721,12 +721,20 @@ async def on_slot_callback(update: Update, context: Context) -> None:
 
 
 async def on_error(update: object, context: Context) -> None:
-    log.exception("Unhandled error while processing update %s", update, exc_info=context.error)
+    # Never log the Update itself: it carries message text and shared coordinates.
+    update_id = update.update_id if isinstance(update, Update) else None
+    user = update.effective_user if isinstance(update, Update) else None
+    log.error(
+        "Unhandled error in update %s (user %s)",
+        update_id,
+        user.id if user else None,
+        exc_info=context.error,
+    )
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text("Something went wrong. Please try again.")
-        except Exception:  # noqa: BLE001 - best effort only
-            pass
+        except TelegramError as exc:
+            log.debug("Could not deliver the error notice: %s", exc)
 
 
 # --- wiring ------------------------------------------------------------------------------
