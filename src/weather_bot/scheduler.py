@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 INTERVAL = 30.0
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN001 - PTB Application
+async def scheduler_loop(app, interval: float = INTERVAL) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
@@ -38,7 +38,7 @@ async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN0
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
+async def tick(app, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -58,7 +58,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
+async def _send(app, user_id: int, data) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -91,7 +91,7 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:  # noqa: ANN001
+def start(app, interval: float = INTERVAL) -> asyncio.Task:
     return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
 
 

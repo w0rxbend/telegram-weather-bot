@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import load_settings
 
+PRIVATE_UMASK = 0o077
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 log = logging.getLogger(__name__)
 
@@ -25,13 +27,14 @@ def quarantine_corrupt_state(path: Path) -> None:
     try:
         with path.open("rb") as fh:
             pickle.load(fh)
-    except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
+    except Exception:
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
-        log.error("State file %s was unreadable (%s); moved to %s", path, exc, backup)
+        log.exception("State file %s was unreadable; moved to %s", path, backup)
 
 
 def start() -> None:
+    os.umask(PRIVATE_UMASK)  # state and quarantined files are readable by this user only
     logging.basicConfig(format=LOG_FORMAT, level=logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -48,11 +51,11 @@ def start() -> None:
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list = []
 
-    async def post_init(app) -> None:  # noqa: ANN001
+    async def post_init(app) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:  # noqa: ANN001
+    async def post_stop(app) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (
