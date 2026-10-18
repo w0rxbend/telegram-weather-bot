@@ -76,3 +76,18 @@ def test_legacy_single_location_is_migrated() -> None:
     locs = store.list_locations(data)
     assert len(locs) == 1 and locs[0].is_default and locs[0].place == KYIV
     assert "location" not in data
+
+
+def test_normalize_alias_strips_control_and_collapses_whitespace() -> None:
+    assert store.normalize_alias("  ho‮me\u0000\n  sweet\thome ") == "home sweet home"
+    assert store.normalize_alias("​\u0007") is None
+    assert store.normalize_alias("ｈｏｍｅ") == "home"  # full-width letters -> NFKC
+    assert store.normalize_alias("x" * 100) == "x" * store.MAX_ALIAS_LENGTH
+
+
+def test_alias_is_normalised_on_add_and_rename() -> None:
+    data: dict = {}
+    loc, _ = store.add_location(data, Place("Kyiv", 50.45, 30.52), "a‮b")
+    assert loc.alias == "ab"
+    renamed = store.rename_location(data, 0, "  c\u0000d ")
+    assert renamed is not None and renamed.alias == "cd"

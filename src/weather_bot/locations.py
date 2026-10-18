@@ -10,6 +10,7 @@ Slots are shown to people 1-based (``/weather 2``); internally they are 0-based 
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,7 @@ KEY_DEFAULT = "default_location"
 LEGACY_KEY = "location"  # single-location format from the first release
 
 MAX_LOCATIONS = 10
+MAX_ALIAS_LENGTH = 30
 SAME_SPOT_DEGREES = 0.005  # ~500 m; closer than that counts as the same place
 
 UserData = MutableMapping[str, Any]
@@ -47,6 +49,16 @@ class SavedLocation:
         if self.alias and self.alias.lower() != self.place.name.lower():
             return f"{self.alias} · {self.place.name}"
         return self.place.name
+
+
+def normalize_alias(text: str | None) -> str | None:
+    """NFKC-normalise, drop control/format characters, collapse spaces, cap the length."""
+    cleaned = "".join(
+        " " if ch.isspace() else ch
+        for ch in unicodedata.normalize("NFKC", text or "")
+        if not unicodedata.category(ch).startswith("C") or ch.isspace()
+    )
+    return " ".join(cleaned.split())[:MAX_ALIAS_LENGTH].strip() or None
 
 
 def _migrate(user_data: UserData) -> None:
@@ -94,7 +106,7 @@ def add_location(
 ) -> tuple[SavedLocation, bool]:
     """Add a place; returns (location, created). Re-sharing a known spot updates its alias."""
     raw = _raw(user_data)
-    alias = (alias or "").strip() or None
+    alias = normalize_alias(alias)
     for i, item in enumerate(raw):
         if (
             abs(item["lat"] - place.latitude) < SAME_SPOT_DEGREES
@@ -137,7 +149,7 @@ def rename_location(user_data: UserData, index: int, alias: str) -> SavedLocatio
     raw = _raw(user_data)
     if not 0 <= index < len(raw):
         return None
-    raw[index]["alias"] = alias.strip() or None
+    raw[index]["alias"] = normalize_alias(alias)
     return list_locations(user_data)[index]
 
 

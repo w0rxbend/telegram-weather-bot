@@ -319,7 +319,7 @@ async def cmd_add(update: Update, context: Context) -> None:
             f"You already have {MAX_LOCATIONS} locations. Remove one with /remove first."
         )
         return
-    alias = _args(context)[:30] or None
+    alias = store.normalize_alias(_args(context))
     _ask_for_location(context, alias)
     hint = f" It will be saved as “{alias}”." if alias else ""
     await message.reply_text(
@@ -405,7 +405,7 @@ async def cmd_rename(update: Update, context: Context) -> None:
     assert message is not None
     index, alias = _slot_arg(context)
     loc = (
-        store.rename_location(context.user_data, index, alias[:30])
+        store.rename_location(context.user_data, index, alias)
         if index is not None and alias
         else None
     )
