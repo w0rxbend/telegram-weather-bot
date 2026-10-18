@@ -28,11 +28,21 @@ include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
 pytest-asyncio = ">=0.24"
+pytest-cov = ">=5.0"
 ruff = ">=0.6"
+mypy = ">=1.11"
+bandit = ">=1.7"
+pip-audit = ">=2.7"
+pre-commit = ">=3.8"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["weather_bot"]
+branch = true
 
 [tool.ruff]
 line-length = 100
@@ -40,4 +50,43 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = [
+    "E", "F", "W", "I", "B", "UP", "C4", "SIM", "PTH", "RUF", "T20",
+    "S",      # bandit
+    "ASYNC",  # blocking calls in async code
+    "BLE",    # blind except
+    "ANN",    # annotations
+    "TRY",    # exception handling
+    "PL",     # pylint (complexity, magic values)
+]
+ignore = [
+    "TRY003",   # user-facing messages are written inline
+    "PLR2004",  # magic-value check is noisy for rendering constants
+    "PLR0911",  # flat code→icon lookup reads best as early returns
+    "PLR0917",  # covered by PLR0913
+    "RUF001", "RUF002", "RUF003",  # typographic quotes and symbols are intentional in bot copy
+]
+
+[tool.ruff.lint.pylint]
+max-args = 7
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+"src/weather_bot/render/**" = ["PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLC0415"]  # drawing code
+"tests/**" = ["S101", "ANN", "PLR0913", "PLR0915", "PLC0415", "T20", "S105", "S106"]
+"scripts/**" = ["T20", "S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+files = ["src"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["dotenv.*"]
+ignore_missing_imports = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]

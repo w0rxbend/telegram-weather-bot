@@ -7,3 +7,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 dist/
+.mypy_cache/
+.coverage
+coverage.xml
+*.pickle
+*.corrupt-*

@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,8 +24,14 @@ jobs:
         run: |
           poetry run ruff check src tests scripts
           poetry run ruff format --check src tests scripts
+      - name: Type check
+        run: poetry run mypy
+      - name: Security scan (bandit)
+        run: poetry run bandit -q -c pyproject.toml -r src
+      - name: Dependency audit
+        run: poetry run pip-audit --skip-editable
       - name: Test
-        run: poetry run pytest -q
+        run: poetry run pytest -q --cov --cov-report=term-missing
       - name: Render a sample card
         run: poetry run python scripts/preview.py --fixture tests/fixtures/forecast.json --out preview.png
       - uses: actions/upload-artifact@v4

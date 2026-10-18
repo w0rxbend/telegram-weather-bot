@@ -23,6 +23,7 @@ from weather_bot.render.theme import (
     uv_label,
 )
 from weather_bot.weather import DayPoint, Forecast, HourPoint, compass, describe, icon_kind
+import itertools
 
 WIDTH, HEIGHT = 1080, 1600
 SCALE = 2
@@ -31,11 +32,11 @@ INNER = WIDTH - 2 * PAD
 
 
 def _alpha(rgb: RGB, a: float) -> tuple[int, int, int, int]:
-    return (*rgb, int(round(255 * a)))
+    return (*rgb, round(255 * a))
 
 
 class Canvas:
-    def __init__(self, width: int, height: int, scale: int):
+    def __init__(self, width: int, height: int, scale: int) -> None:
         self.scale = scale
         self.w, self.h = width * scale, height * scale
         self.img = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 255))
@@ -44,7 +45,7 @@ class Canvas:
     # -- geometry -----------------------------------------------------------------------
 
     def px(self, v: float) -> int:
-        return int(round(v * self.scale))
+        return round(v * self.scale)
 
     def box(self, x0: float, y0: float, x1: float, y1: float) -> list[int]:
         return [self.px(x0), self.px(y0), self.px(x1), self.px(y1)]
@@ -352,7 +353,7 @@ def _hourly(c: Canvas, fc: Forecast) -> None:
     line_layer = c.layer()
     ld = ImageDraw.Draw(line_layer)
     lw = 4.5
-    for (xa, ya), (xb, yb) in zip(curve, curve[1:], strict=False):
+    for (xa, ya), (xb, yb) in itertools.pairwise(curve):
         t = lo + (chart_bottom - (ya + yb) / 2) / (chart_bottom - chart_top) * (hi - lo)
         colour = _alpha(temp_colour(t, imperial), 1.0)
         ld.line([(c.px(xa), c.px(ya)), (c.px(xb), c.px(yb))], fill=colour, width=c.px(lw))

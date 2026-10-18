@@ -13,8 +13,8 @@ from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from weather_bot.render import icons  # noqa: E402
-from weather_bot.render.theme import theme_for  # noqa: E402
+from weather_bot.render import icons
+from weather_bot.render.theme import theme_for
 
 
 def render_avatar(size: int = 512) -> Image.Image:

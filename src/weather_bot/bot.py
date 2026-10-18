@@ -113,7 +113,7 @@ HELP = (
 # --- helpers -----------------------------------------------------------------------------
 
 
-def _client(context: Context) -> httpx.AsyncClient:  # noqa: ARG001 - kept for call sites
+def _client(context: Context) -> httpx.AsyncClient:
     return runtime.http()
 
 

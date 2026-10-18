@@ -52,7 +52,7 @@ def start() -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:  # noqa: ANN001, ARG001
+    async def post_stop(app) -> None:  # noqa: ANN001
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

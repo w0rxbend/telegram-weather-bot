@@ -36,7 +36,7 @@ SS = 4  # supersampling factor
 class _Pen:
     """Tiny helper that draws in a 100-unit design box scaled to the real canvas."""
 
-    def __init__(self, size: int):
+    def __init__(self, size: int) -> None:
         self.size = size * SS
         self.u = self.size / 100.0
         self.img = Image.new("RGBA", (self.size, self.size), (0, 0, 0, 0))

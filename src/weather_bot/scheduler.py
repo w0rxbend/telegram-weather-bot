@@ -33,7 +33,7 @@ async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN0
             await tick(app)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - keep the loop alive whatever happens
+        except Exception:
             log.exception("Scheduler tick failed")
         await asyncio.sleep(interval)
 
