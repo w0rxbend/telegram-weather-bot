@@ -101,3 +101,14 @@ async def test_flood_control_is_waited_out_then_retried(forecast: Forecast) -> N
         assert await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC)) == 1
     assert app.bot.send_photo.await_count == 2
     sleep.assert_awaited_once_with(2.0)
+
+
+async def test_loop_beats_after_each_tick(tmp_path) -> None:  # noqa: ANN001
+    import asyncio
+
+    app = make_app({})
+    beat_file = tmp_path / "heartbeat"
+    task = scheduler.start(app, interval=0.01, heartbeat=beat_file)
+    await asyncio.sleep(0.05)
+    task.cancel()
+    assert beat_file.exists()

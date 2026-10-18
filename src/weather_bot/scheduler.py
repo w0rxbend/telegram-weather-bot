@@ -13,10 +13,12 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from telegram.constants import ParseMode
 from telegram.error import Forbidden, RetryAfter, TelegramError
 
+from weather_bot import healthcheck
 from weather_bot import locations as store
 from weather_bot import schedule as sched
 from weather_bot.weather import WeatherError
@@ -27,7 +29,11 @@ INTERVAL = 30.0
 MAX_RETRY_AFTER = 30.0  # never stall the whole tick longer than this for one chat
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN001 - PTB Application
+async def scheduler_loop(
+    app,  # noqa: ANN001 - PTB Application
+    interval: float = INTERVAL,
+    heartbeat: Path | None = None,
+) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
@@ -36,6 +42,8 @@ async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN0
             raise
         except Exception:  # noqa: BLE001 - keep the loop alive whatever happens
             log.exception("Scheduler tick failed")
+        if heartbeat is not None:
+            healthcheck.beat(heartbeat)
         await asyncio.sleep(interval)
 
 
@@ -108,8 +116,12 @@ async def _send_photo_honouring_flood_control(app, **kwargs) -> None:  # noqa: A
         await app.bot.send_photo(parse_mode=ParseMode.HTML, **kwargs)
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:  # noqa: ANN001
-    return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
+def start(
+    app,  # noqa: ANN001
+    interval: float = INTERVAL,
+    heartbeat: Path | None = None,
+) -> asyncio.Task:
+    return asyncio.create_task(scheduler_loop(app, interval, heartbeat), name="weather-scheduler")
 
 
 async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:

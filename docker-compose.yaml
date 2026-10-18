@@ -7,6 +7,14 @@ services:
       - DATA_DIR=/data
     volumes:
       - weather-bot-data:/data
+    # Only /data is written to; everything else is immutable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   weather-bot-data:
