@@ -10,13 +10,14 @@ from __future__ import annotations
 import contextlib
 import os
 from pathlib import Path
+from typing import Any
 
 from telegram.ext import PicklePersistence
 
 STATE_FILE_MODE = 0o600  # saved coordinates are personal data
 
 
-class AtomicPicklePersistence(PicklePersistence):
+class AtomicPicklePersistence(PicklePersistence[dict[Any, Any], dict[Any, Any], dict[Any, Any]]):
     def _dump_singlefile(self) -> None:
         target = Path(self.filepath)
         tmp = target.with_name(f"{target.name}.tmp")

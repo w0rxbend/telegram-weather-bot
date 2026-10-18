@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram import Message
 
 from weather_bot import bot
 from weather_bot import locations as store
@@ -204,8 +205,10 @@ def make_query(data: str) -> MagicMock:
     query.answer = AsyncMock()
     query.edit_message_media = AsyncMock()
     query.edit_message_text = AsyncMock()
+    query.message = MagicMock(spec=Message)
     query.message.reply_text = AsyncMock()
     query.message.reply_photo = AsyncMock()
+    query.message.chat = MagicMock()
     query.message.chat.send_action = AsyncMock()
     return query
 
@@ -366,10 +369,7 @@ def test_parse_callback_accepts_boundaries() -> None:
 
 
 async def test_refresh_failure_answers_the_query_only_once() -> None:
-    query = MagicMock()
-    query.data = "r|50.4500|30.5200"
-    query.answer = AsyncMock()
-    query.message.reply_text = AsyncMock()
+    query = make_query("r|50.4500|30.5200")
     update = SimpleNamespace(callback_query=query)
     failing = AsyncMock(side_effect=bot.WeatherError("down"))
     with patch.object(bot, "_build_card", failing):

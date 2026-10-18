@@ -35,7 +35,7 @@ def _alpha(rgb: RGB, a: float) -> tuple[int, int, int, int]:
 
 
 class Canvas:
-    def __init__(self, width: int, height: int, scale: int):
+    def __init__(self, width: int, height: int, scale: int) -> None:
         self.scale = scale
         self.w, self.h = width * scale, height * scale
         self.img = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 255))
@@ -139,7 +139,7 @@ class Canvas:
     # -- images -------------------------------------------------------------------------
 
     def icon(self, kind: str, is_day: bool, size: int, x: float, y: float) -> None:
-        im = icons.icon(kind, is_day, self.px(size))  # type: ignore[arg-type]
+        im = icons.icon(kind, is_day, self.px(size))
         self.composite(im, x, y)
 
     def finish(self) -> Image.Image:

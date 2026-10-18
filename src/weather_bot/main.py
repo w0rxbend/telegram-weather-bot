@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import pickle
+import pickle  # nosec B403
 import time
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import httpx
 from telegram.ext import ApplicationBuilder
 
 from weather_bot import scheduler
+from weather_bot.app_types import App
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import Settings, load_settings
 from weather_bot.persistence import AtomicPicklePersistence
@@ -27,7 +29,8 @@ def quarantine_corrupt_state(path: Path) -> None:
         return
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)
+            # Our own file in the data volume.
+            pickle.load(fh)  # noqa: S301  # nosec B301
     except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
@@ -53,13 +56,13 @@ def start() -> None:
     quarantine_corrupt_state(settings.persistence_file)
 
     bot_post_init = make_post_init(lambda: build_http_client(settings))
-    scheduler_task: list = []
+    scheduler_task: list[asyncio.Task[None]] = []
 
-    async def post_init(app) -> None:  # noqa: ANN001
+    async def post_init(app: App) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app, heartbeat=settings.heartbeat_file))
 
-    async def post_stop(app) -> None:  # noqa: ANN001, ARG001
+    async def post_stop(app: App) -> None:  # noqa: ARG001 - PTB callback signature
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

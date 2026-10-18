@@ -10,17 +10,20 @@ outside of an update handler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from telegram import InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.error import Forbidden, RetryAfter, TelegramError
 
 from weather_bot import healthcheck
 from weather_bot import locations as store
 from weather_bot import schedule as sched
+from weather_bot.app_types import App
 from weather_bot.weather import WeatherError
 
 log = logging.getLogger(__name__)
@@ -30,7 +33,7 @@ MAX_RETRY_AFTER = 30.0  # never stall the whole tick longer than this for one ch
 
 
 async def scheduler_loop(
-    app,  # noqa: ANN001 - PTB Application
+    app: App,
     interval: float = INTERVAL,
     heartbeat: Path | None = None,
 ) -> None:
@@ -47,7 +50,7 @@ async def scheduler_loop(
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
+async def tick(app: App, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -70,7 +73,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
+async def _send(app: App, user_id: int, data: store.UserData) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -103,34 +106,41 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
 
 
-async def _send_photo_honouring_flood_control(app, **kwargs) -> None:  # noqa: ANN001, ANN003
+async def _send_photo_honouring_flood_control(
+    app: App, *, chat_id: int, photo: bytes, caption: str, reply_markup: InlineKeyboardMarkup
+) -> None:
     """Send a photo; on Telegram flood control wait the requested time and retry once."""
+    kwargs = {
+        "chat_id": chat_id,
+        "photo": photo,
+        "caption": caption,
+        "reply_markup": reply_markup,
+        "parse_mode": ParseMode.HTML,
+    }
     try:
-        await app.bot.send_photo(parse_mode=ParseMode.HTML, **kwargs)
+        await app.bot.send_photo(**kwargs)
     except RetryAfter as exc:
         wait = exc.retry_after  # int today, timedelta once PTB_TIMEDELTA becomes the default
         seconds = wait.total_seconds() if isinstance(wait, timedelta) else float(wait)
         delay = min(seconds, MAX_RETRY_AFTER)
         log.warning("Flood control: waiting %.0fs before retrying a scheduled send", delay)
         await asyncio.sleep(delay)
-        await app.bot.send_photo(parse_mode=ParseMode.HTML, **kwargs)
+        await app.bot.send_photo(**kwargs)
 
 
 def start(
-    app,  # noqa: ANN001
+    app: App,
     interval: float = INTERVAL,
     heartbeat: Path | None = None,
-) -> asyncio.Task:
+) -> asyncio.Task[None]:
     return asyncio.create_task(scheduler_loop(app, interval, heartbeat), name="weather-scheduler")
 
 
-async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:
+async def stop(task: asyncio.Task[None] | None, on_done: Callable[[], None] | None = None) -> None:
     if task is None:
         return
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     if on_done:
         on_done()

@@ -34,7 +34,7 @@ class Entry:
 
 
 class ForecastCache:
-    def __init__(self, ttl: float = DEFAULT_TTL, max_entries: int = MAX_ENTRIES):
+    def __init__(self, ttl: float = DEFAULT_TTL, max_entries: int = MAX_ENTRIES) -> None:
         self.ttl = ttl
         self.max_entries = max_entries
         self._entries: OrderedDict[tuple[float, float, str], Entry] = OrderedDict()
