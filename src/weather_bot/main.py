@@ -43,7 +43,8 @@ def start() -> None:
         return httpx.AsyncClient(
             timeout=settings.http_timeout,
             headers={"User-Agent": settings.user_agent},
-            follow_redirects=True,
+            follow_redirects=False,  # none of the three APIs redirect; do not follow surprises
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
     bot_post_init = make_post_init(http_factory)
