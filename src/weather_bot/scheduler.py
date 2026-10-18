@@ -13,10 +13,11 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 
 from weather_bot import locations as store
 from weather_bot import schedule as sched
@@ -25,6 +26,8 @@ from weather_bot.weather import WeatherError
 log = logging.getLogger(__name__)
 
 INTERVAL = 30.0
+MAX_RETRY_AFTER = 60.0  # longest flood-control wait we will sit out inside a tick
+CHAT_GONE = "chat not found"
 
 
 async def scheduler_loop(app, interval: float = INTERVAL) -> None:
@@ -81,7 +84,8 @@ async def _send(app, user_id: int, data) -> None:
         return
     sched.update_timezone(data, forecast.timezone)
     try:
-        await app.bot.send_photo(
+        await _send_photo(
+            app,
             chat_id=schedule.chat_id,
             photo=png,
             caption=_caption(place, forecast, "weather"),
@@ -91,8 +95,28 @@ async def _send(app, user_id: int, data) -> None:
     except Forbidden:
         log.info("User %s blocked the bot; schedule removed", user_id)
         sched.clear_schedule(data)
+    except BadRequest as exc:
+        if CHAT_GONE not in str(exc).lower():
+            log.warning("Scheduled send for user %s failed: %s", user_id, exc)
+            return
+        log.info("Chat of user %s no longer exists; schedule removed", user_id)
+        sched.clear_schedule(data)
     except TelegramError as exc:
         log.warning("Scheduled send for user %s failed: %s", user_id, exc)
+
+
+async def _send_photo(app, **kwargs: Any) -> None:
+    """send_photo, sitting out one Telegram flood-control (429) wait before giving up."""
+    try:
+        await app.bot.send_photo(**kwargs)
+    except RetryAfter as exc:
+        delay = exc.retry_after
+        seconds = delay.total_seconds() if isinstance(delay, timedelta) else float(delay)
+        if seconds > MAX_RETRY_AFTER:
+            raise
+        log.warning("Flood control: waiting %.0fs before retrying", seconds)
+        await asyncio.sleep(seconds)
+        await app.bot.send_photo(**kwargs)
 
 
 def start(app, interval: float = INTERVAL) -> asyncio.Task:
