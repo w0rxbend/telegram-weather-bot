@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
+import weakref
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from html import escape
@@ -55,6 +57,7 @@ from weather_bot.caption import build_caption, build_sun_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.identity import sync_identity
 from weather_bot.locations import MAX_LOCATIONS, SavedLocation
+from weather_bot.ratelimit import RateLimiter
 from weather_bot.render import render_card, render_sun_card
 from weather_bot.weather import Forecast, Units, WeatherError
 
@@ -768,35 +771,81 @@ async def post_shutdown(app: Application) -> None:
     runtime.set_http(None)
 
 
+_user_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
+_card_limiter = RateLimiter()
+RATE_LIMITED_TEXT = "You're asking for cards too fast. Please wait a minute and try again."
+
+Handler = Callable[[Update, Context], Awaitable[None]]
+
+
+def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
+    """Run ``callback`` one update at a time per user, optionally rate limited.
+
+    PTB runs updates concurrently; two quick taps from one user would otherwise interleave
+    their read-modify-write of ``user_data`` (slots, schedule).
+    """
+
+    @functools.wraps(callback)
+    async def wrapper(update: Update, context: Context) -> None:
+        user = update.effective_user
+        if user is None:
+            return
+        if rate_limited and not _card_limiter.allow(user.id):
+            if update.callback_query:
+                await update.callback_query.answer(RATE_LIMITED_TEXT, show_alert=True)
+            elif update.effective_message:
+                await update.effective_message.reply_text(RATE_LIMITED_TEXT)
+            return
+        lock = _user_locks.get(user.id)
+        if lock is None:
+            lock = _user_locks[user.id] = asyncio.Lock()
+        async with lock:
+            await callback(update, context)
+
+    return wrapper
+
+
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
     commands: list[tuple[str | list[str], Callable[..., Awaitable[None]]]] = [
-        ("start", cmd_start),
-        (["add", "setup"], cmd_add),
-        (["weather", "now", "w"], cmd_weather),
-        (["sun", "sunset", "sunrise"], cmd_sun),
-        (["locations", "list"], cmd_locations),
-        ("default", cmd_default),
-        (["remove", "delete"], cmd_remove),
-        ("rename", cmd_rename),
-        ("schedule", cmd_schedule),
-        ("units", cmd_units),
+        ("start", _guarded(cmd_start)),
+        (["add", "setup"], _guarded(cmd_add)),
+        (["weather", "now", "w"], _guarded(cmd_weather, rate_limited=True)),
+        (["sun", "sunset", "sunrise"], _guarded(cmd_sun, rate_limited=True)),
+        (["locations", "list"], _guarded(cmd_locations)),
+        ("default", _guarded(cmd_default)),
+        (["remove", "delete"], _guarded(cmd_remove)),
+        ("rename", _guarded(cmd_rename)),
+        ("schedule", _guarded(cmd_schedule)),
+        ("units", _guarded(cmd_units)),
         ("help", cmd_help),
     ]
     for names, callback in commands:
         # new messages only: edited messages and channel posts have no usable user_data
         app.add_handler(CommandHandler(names, callback, filters=filters.UpdateType.MESSAGE))
-    app.add_handler(MessageHandler(filters.LOCATION & filters.UpdateType.MESSAGE, on_location))
     app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE, on_text)
+        MessageHandler(
+            filters.LOCATION & filters.UpdateType.MESSAGE, _guarded(on_location, rate_limited=True)
+        )
     )
     app.add_handler(
-        CallbackQueryHandler(on_card_callback, pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|")
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE,
+            _guarded(on_text, rate_limited=True),
+        )
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_slot_callback,
+            _guarded(on_card_callback, rate_limited=True),
+            pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            _guarded(on_slot_callback, rate_limited=True),
             pattern=rf"^({CB_WEATHER_SLOT}|{CB_DEFAULT_SLOT}|{CB_REMOVE_SLOT}|{CB_LIST})\|",
         )
     )
-    app.add_handler(CallbackQueryHandler(on_schedule_callback, pattern=rf"^{CB_SCHEDULE}\|"))
+    app.add_handler(
+        CallbackQueryHandler(_guarded(on_schedule_callback), pattern=rf"^{CB_SCHEDULE}\|")
+    )
     app.add_error_handler(on_error)
