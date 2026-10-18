@@ -401,3 +401,12 @@ async def test_callback_on_inaccessible_message_is_answered_as_expired() -> None
     query.answer.assert_awaited_once()
     assert "expired" in query.answer.await_args.args[0]
     query.edit_message_media.assert_not_awaited()
+
+
+async def test_unmatched_slot_reply_stays_within_telegram_limit() -> None:
+    ctx = make_context(args=["x" * 4000])
+    store.add_location(ctx.user_data, KYIV)
+    update = make_update()
+    await bot.cmd_weather(update, ctx)
+    text = update.effective_message.reply_text.await_args.args[0]
+    assert len(text) < 200

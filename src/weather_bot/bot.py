@@ -70,6 +70,7 @@ KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
+MAX_ECHOED_QUERY = 40  # replies must stay under Telegram's 4096-character limit
 MAX_LATITUDE = 90.0
 MAX_LONGITUDE = 180.0
 
@@ -394,7 +395,8 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
     loc = store.resolve(_user_data(context), query)
     if loc is None:
         await message.reply_text(
-            f"No saved location matches “{query}”. Send /locations to see your slots."
+            f"No saved location matches “{query[:MAX_ECHOED_QUERY]}”. "
+            "Send /locations to see your slots."
         )
         return
     await _send_card(message, context, card_place(loc), kind=kind)
