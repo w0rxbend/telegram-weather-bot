@@ -376,3 +376,21 @@ async def test_refresh_failure_answers_the_query_only_once() -> None:
         await bot.on_card_callback(update, make_context())  # type: ignore[arg-type]
     query.answer.assert_awaited_once()
     query.message.reply_text.assert_awaited_once()
+
+
+async def test_send_card_is_rate_limited_per_chat(forecast: Forecast) -> None:
+    from weather_bot import runtime
+    from weather_bot.ratelimit import SlidingWindowLimiter
+
+    update = make_update()
+    ctx = make_context()
+    fetch, render = patched(forecast)
+    with (
+        fetch,
+        render,
+        patch.object(runtime, "_card_limiter", SlidingWindowLimiter(limit=2, window=60)),
+    ):
+        for _ in range(3):
+            await bot._send_card(update.effective_message, ctx, KYIV)
+    assert update.effective_message.reply_photo.await_count == 2
+    assert bot.RATE_LIMITED_TEXT in update.effective_message.reply_text.await_args.args[0]

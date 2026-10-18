@@ -89,6 +89,8 @@ LOCATION_KEYBOARD = ReplyKeyboardMarkup(
     input_field_placeholder="…or type a city name",
 )
 
+RATE_LIMITED_TEXT = "Slow down a little – too many cards at once. Try again in a minute."
+
 WELCOME = (
     "Hi {name}! I turn your location into a weather infographic.\n\n"
     "Tap <b>📍 Share my location</b> below, or type a city name. "
@@ -235,6 +237,9 @@ async def _send_card(
     kind: CardKind = "weather",
 ) -> None:
     """Send a fresh card as a reply to ``message``; ``intro`` also drops the reply keyboard."""
+    if not runtime.card_limiter().allow(message.chat.id):
+        await message.reply_text(RATE_LIMITED_TEXT)
+        return
     units = _units(context)
     await message.chat.send_action(ChatAction.UPLOAD_PHOTO)
     try:
@@ -656,6 +661,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
         await query.answer("This button has expired. Send /weather instead.")
         return
     action, lat, lon = parsed
+    if not runtime.card_limiter().allow(query.message.chat.id):
+        await query.answer(RATE_LIMITED_TEXT)
+        return
 
     if action == CB_UNITS:
         context.user_data[KEY_UNITS] = "imperial" if _units(context) == "metric" else "metric"

@@ -12,10 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import Forbidden, RetryAfter, TelegramError
 
 from weather_bot import locations as store
 from weather_bot import schedule as sched
@@ -24,6 +24,7 @@ from weather_bot.weather import WeatherError
 log = logging.getLogger(__name__)
 
 INTERVAL = 30.0
+MAX_RETRY_AFTER = 30.0  # never stall the whole tick longer than this for one chat
 
 
 async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN001 - PTB Application
@@ -80,11 +81,11 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         return
     sched.update_timezone(data, forecast.timezone)
     try:
-        await app.bot.send_photo(
+        await _send_photo_honouring_flood_control(
+            app,
             chat_id=schedule.chat_id,
             photo=png,
             caption=_caption(place, forecast, "weather"),
-            parse_mode=ParseMode.HTML,
             reply_markup=_keyboard(place, units, "weather"),
         )
     except Forbidden:
@@ -92,6 +93,19 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         sched.clear_schedule(data)
     except TelegramError as exc:
         log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
+
+
+async def _send_photo_honouring_flood_control(app, **kwargs) -> None:  # noqa: ANN001, ANN003
+    """Send a photo; on Telegram flood control wait the requested time and retry once."""
+    try:
+        await app.bot.send_photo(parse_mode=ParseMode.HTML, **kwargs)
+    except RetryAfter as exc:
+        wait = exc.retry_after  # int today, timedelta once PTB_TIMEDELTA becomes the default
+        seconds = wait.total_seconds() if isinstance(wait, timedelta) else float(wait)
+        delay = min(seconds, MAX_RETRY_AFTER)
+        log.warning("Flood control: waiting %.0fs before retrying a scheduled send", delay)
+        await asyncio.sleep(delay)
+        await app.bot.send_photo(parse_mode=ParseMode.HTML, **kwargs)
 
 
 def start(app, interval: float = INTERVAL) -> asyncio.Task:  # noqa: ANN001

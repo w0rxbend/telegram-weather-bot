@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import httpx
 
+from weather_bot.ratelimit import SlidingWindowLimiter
+
 _http: httpx.AsyncClient | None = None
 
 
@@ -20,3 +22,10 @@ def http() -> httpx.AsyncClient:
     if _http is None:
         raise RuntimeError("HTTP client is not initialised")
     return _http
+
+
+_card_limiter = SlidingWindowLimiter()
+
+
+def card_limiter() -> SlidingWindowLimiter:
+    return _card_limiter
