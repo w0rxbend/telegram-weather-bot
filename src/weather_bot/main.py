@@ -8,11 +8,12 @@ import time
 from pathlib import Path
 
 import httpx
-from telegram.ext import ApplicationBuilder, PicklePersistence
+from telegram.ext import ApplicationBuilder
 
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import Settings, load_settings
+from weather_bot.persistence import AtomicPicklePersistence
 from weather_bot.updates import PerUserUpdateProcessor
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -64,7 +65,7 @@ def start() -> None:
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
-        .persistence(PicklePersistence(filepath=settings.persistence_file))
+        .persistence(AtomicPicklePersistence(filepath=settings.persistence_file))
         .concurrent_updates(PerUserUpdateProcessor())
         .post_init(post_init)
         .post_stop(post_stop)

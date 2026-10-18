@@ -49,7 +49,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "B", "UP", "S", "BLE", "ANN", "C4", "SIM", "RET", "PTH", "ASYNC", "T20"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "ANN", "S105", "S106"]
+"tests/**" = ["S101", "ANN", "S105", "S106", "ASYNC240"]
 "scripts/**" = ["T201", "ANN"]
 
 [tool.mypy]

@@ -10,7 +10,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 TOKEN_PATTERN = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 DEFAULT_HTTP_TIMEOUT = 15.0
 MAX_HTTP_TIMEOUT = 120.0
