@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import pickle
+import pickle  # nosec B403
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import load_settings
 from weather_bot.persistence import AtomicPicklePersistence
+from weather_bot.runtime import App
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 log = logging.getLogger(__name__)
@@ -23,9 +25,10 @@ def quarantine_corrupt_state(path: Path) -> None:
     """Move an unreadable pickle aside so a bad file cannot crash-loop the bot."""
     if not path.exists():
         return
+    # Safe by construction: this is the bot's own state file in DATA_DIR, never user input.
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)  # noqa: S301 - the bot's own state file, never user input
+            pickle.load(fh)  # noqa: S301  # nosec B301
     except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
@@ -48,13 +51,13 @@ def start() -> None:
         )
 
     bot_post_init = make_post_init(http_factory)
-    scheduler_task: list = []
+    scheduler_task: list[asyncio.Task[None]] = []
 
-    async def post_init(app) -> None:
+    async def post_init(app: App) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app, heartbeat=settings.heartbeat_file))
 
-    async def post_stop(app) -> None:
+    async def post_stop(app: App) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

@@ -388,3 +388,23 @@ def test_handlers_ignore_edited_messages_and_channel_posts() -> None:
             text = repr(handler.filters)
             assert "UpdateType.MESSAGE" in text, handler
             assert "UpdateType.MESSAGES" not in text, handler
+
+
+def test_accessors_raise_on_missing_fields() -> None:
+    with pytest.raises(bot.UnexpectedUpdateError):
+        bot._message(SimpleNamespace(effective_message=None))
+    with pytest.raises(bot.UnexpectedUpdateError):
+        bot._callback(SimpleNamespace(callback_query=None))
+    with pytest.raises(bot.UnexpectedUpdateError):
+        bot._user_data(SimpleNamespace(user_data=None))
+
+
+def test_inaccessible_button_message_counts_as_expired() -> None:
+    from datetime import UTC, datetime
+
+    from telegram import Chat, InaccessibleMessage
+
+    gone = InaccessibleMessage(chat=Chat(id=1, type="private"), message_id=5)
+    assert datetime.fromtimestamp(0, UTC) == gone.date
+    assert bot._query_message(SimpleNamespace(message=gone)) is None
+    assert bot._query_message(SimpleNamespace(message=None)) is None

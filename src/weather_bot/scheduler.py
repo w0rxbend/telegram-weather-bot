@@ -23,6 +23,8 @@ from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 from weather_bot import health
 from weather_bot import locations as store
 from weather_bot import schedule as sched
+from weather_bot.locations import UserData
+from weather_bot.runtime import App
 from weather_bot.weather import WeatherError
 
 log = logging.getLogger(__name__)
@@ -33,7 +35,7 @@ CHAT_GONE = "chat not found"
 
 
 async def scheduler_loop(
-    app,
+    app: App,
     interval: float = INTERVAL,
     heartbeat: Path | None = None,
 ) -> None:
@@ -50,7 +52,7 @@ async def scheduler_loop(
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:
+async def tick(app: App, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -73,7 +75,7 @@ async def tick(app, now: datetime | None = None) -> int:
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:
+async def _send(app: App, user_id: int, data: UserData) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -113,7 +115,7 @@ async def _send(app, user_id: int, data) -> None:
         log.warning("Scheduled send for user %s failed: %s", user_id, exc)
 
 
-async def _send_photo(app, **kwargs: Any) -> None:
+async def _send_photo(app: App, **kwargs: Any) -> None:
     """send_photo, sitting out one Telegram flood-control (429) wait before giving up."""
     try:
         await app.bot.send_photo(**kwargs)
@@ -127,11 +129,13 @@ async def _send_photo(app, **kwargs: Any) -> None:
         await app.bot.send_photo(**kwargs)
 
 
-def start(app, interval: float = INTERVAL, heartbeat: Path | None = None) -> asyncio.Task:
+def start(
+    app: App, interval: float = INTERVAL, heartbeat: Path | None = None
+) -> asyncio.Task[None]:
     return asyncio.create_task(scheduler_loop(app, interval, heartbeat), name="weather-scheduler")
 
 
-async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:
+async def stop(task: asyncio.Task[None] | None, on_done: Callable[[], None] | None = None) -> None:
     if task is None:
         return
     task.cancel()
