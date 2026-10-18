@@ -17,7 +17,7 @@ LVIV = Place(name="Lviv, Ukraine", latitude=49.84, longitude=24.03)
 def make_context(user_data: dict | None = None, args: list[str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         user_data=user_data if user_data is not None else {},
-        bot_data={"http": object()},
+        bot_data={},
         args=args or [],
     )
 

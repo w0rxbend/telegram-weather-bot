@@ -45,6 +45,7 @@ from telegram.ext import (
 )
 
 from weather_bot import locations as store
+from weather_bot import runtime
 from weather_bot.caption import build_caption, build_sun_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.identity import sync_identity
@@ -104,8 +105,8 @@ HELP = (
 # --- helpers -----------------------------------------------------------------------------
 
 
-def _client(context: Context) -> httpx.AsyncClient:
-    return context.bot_data["http"]
+def _client(context: Context) -> httpx.AsyncClient:  # noqa: ARG001 - kept for call sites
+    return runtime.http()
 
 
 def _units(context: Context) -> Units:
@@ -579,16 +580,19 @@ def make_post_init(
     http_factory: Callable[[], httpx.AsyncClient],
 ) -> Callable[[Application], Awaitable[None]]:
     async def post_init(app: Application) -> None:
-        app.bot_data["http"] = http_factory()
+        runtime.set_http(http_factory())
+        app.bot_data.pop("http", None)  # left behind by versions < 1.1; never persistable
         await sync_identity(app.bot)
 
     return post_init
 
 
 async def post_shutdown(app: Application) -> None:
-    client: httpx.AsyncClient | None = app.bot_data.get("http")
-    if client is not None:
-        await client.aclose()
+    try:
+        await runtime.http().aclose()
+    except RuntimeError:
+        pass
+    runtime.set_http(None)
 
 
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
