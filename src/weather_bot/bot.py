@@ -18,9 +18,10 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from functools import wraps
 from html import escape
@@ -28,6 +29,7 @@ from typing import Any, Literal
 
 import httpx
 from telegram import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -61,6 +63,8 @@ from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
 log = logging.getLogger(__name__)
 
 Context = ContextTypes.DEFAULT_TYPE
+App = Application[Any, Any, Any, Any, Any, Any]
+Handler = Callable[[Update, Context], Coroutine[Any, Any, None]]
 
 KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
@@ -117,9 +121,7 @@ HELP = (
 # --- rate limiting -----------------------------------------------------------------------
 
 
-def throttled(
-    handler: Callable[[Update, Context], Awaitable[None]],
-) -> Callable[[Update, Context], Awaitable[None]]:
+def throttled(handler: Handler) -> Handler:
     """Per-user cooldown for handlers that hit external services or render cards.
 
     Messages inside the cooldown are dropped silently (answering would amplify a flood);
@@ -142,12 +144,36 @@ def throttled(
 # --- helpers -----------------------------------------------------------------------------
 
 
+class UnsupportedUpdateError(RuntimeError):
+    """A handler received an update without the part it is registered for."""
+
+
+def _require_message(update: Update) -> Message:
+    message = update.effective_message
+    if message is None:
+        raise UnsupportedUpdateError("update has no effective message")
+    return message
+
+
+def _require_query(update: Update) -> CallbackQuery:
+    if update.callback_query is None:
+        raise UnsupportedUpdateError("update has no callback query")
+    return update.callback_query
+
+
+def _user_data(context: Context) -> dict[Any, Any]:
+    if context.user_data is None:
+        raise UnsupportedUpdateError("update has no user, so there is no user_data")
+    return context.user_data
+
+
 def _client(context: Context) -> httpx.AsyncClient:
     return runtime.http()
 
 
 def _units(context: Context) -> Units:
-    return context.user_data.get(KEY_UNITS, "metric")
+    units: Units = _user_data(context).get(KEY_UNITS, "metric")
+    return units
 
 
 def _args(context: Context) -> str:
@@ -168,7 +194,7 @@ def _remember_place(context: Context, place: Place) -> None:
 
 
 def _recall_place(context: Context, lat: float, lon: float) -> Place:
-    for loc in store.list_locations(context.user_data):
+    for loc in store.list_locations(_user_data(context)):
         if _place_key(loc.place.latitude, loc.place.longitude) == _place_key(lat, lon):
             return Place(name=loc.card_name, latitude=lat, longitude=lon)
     name = context.bot_data.get(KEY_PLACES, {}).get(_place_key(lat, lon))
@@ -208,7 +234,7 @@ def caption_for(place: Place, fc: Forecast, kind: CardKind = "weather") -> str:
 
 
 def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]:
-    locs = store.list_locations(context.user_data)
+    locs = store.list_locations(_user_data(context))
     if not locs:
         return (
             "You have no saved locations yet. Share one with /add or type a city name.",
@@ -285,10 +311,10 @@ async def _send_card(
 
 
 async def _save_and_send(message: Message, context: Context, place: Place) -> None:
-    awaiting = context.user_data.pop(KEY_AWAITING, None) or {}
+    awaiting = _user_data(context).pop(KEY_AWAITING, None) or {}
     alias = awaiting.get("alias") if isinstance(awaiting, dict) else None
     try:
-        loc, created = store.add_location(context.user_data, place, alias)
+        loc, created = store.add_location(_user_data(context), place, alias)
     except ValueError as exc:
         await message.reply_text(str(exc), reply_markup=ReplyKeyboardRemove())
         return
@@ -303,7 +329,7 @@ async def _save_and_send(message: Message, context: Context, place: Place) -> No
 
 
 def _ask_for_location(context: Context, alias: str | None = None) -> None:
-    context.user_data[KEY_AWAITING] = {"alias": alias or None}
+    _user_data(context)[KEY_AWAITING] = {"alias": alias or None}
 
 
 # --- command handlers ---------------------------------------------------------------------
@@ -311,9 +337,10 @@ def _ask_for_location(context: Context, alias: str | None = None) -> None:
 
 async def cmd_start(update: Update, context: Context) -> None:
     user = update.effective_user
-    message = update.effective_message
-    assert user is not None and message is not None
-    default = store.get_default(context.user_data)
+    message = _require_message(update)
+    if user is None:
+        raise UnsupportedUpdateError("update has no user")
+    default = store.get_default(_user_data(context))
     if default:
         await message.reply_text(
             f"Welcome back! Your default location is <b>{escape(default.label)}</b>.\n"
@@ -331,9 +358,8 @@ async def cmd_start(update: Update, context: Context) -> None:
 
 
 async def cmd_add(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
-    if len(store.list_locations(context.user_data)) >= MAX_LOCATIONS:
+    message = _require_message(update)
+    if len(store.list_locations(_user_data(context))) >= MAX_LOCATIONS:
         await message.reply_text(
             f"You already have {MAX_LOCATIONS} locations. Remove one with /remove first."
         )
@@ -356,9 +382,8 @@ async def cmd_sun(update: Update, context: Context) -> None:
 
 
 async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> None:
-    message = update.effective_message
-    assert message is not None
-    if not store.list_locations(context.user_data):
+    message = _require_message(update)
+    if not store.list_locations(_user_data(context)):
         _ask_for_location(context)
         await message.reply_text(
             "I don't have your location yet. Share it below or type a city name.",
@@ -366,7 +391,7 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
         )
         return
     query = _args(context)
-    loc = store.resolve(context.user_data, query)
+    loc = store.resolve(_user_data(context), query)
     if loc is None:
         await message.reply_text(
             f"No saved location matches “{query}”. Send /locations to see your slots."
@@ -376,8 +401,7 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
 
 
 async def cmd_locations(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     text, keyboard = _locations_view(context)
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
@@ -391,10 +415,9 @@ def _slot_arg(context: Context) -> tuple[int | None, str]:
 
 
 async def cmd_default(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     index, _ = _slot_arg(context)
-    loc = store.set_default(context.user_data, index) if index is not None else None
+    loc = store.set_default(_user_data(context), index) if index is not None else None
     if loc is None:
         await message.reply_text("Usage: /default N – see /locations for slot numbers.")
         return
@@ -404,10 +427,9 @@ async def cmd_default(update: Update, context: Context) -> None:
 
 
 async def cmd_remove(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     index, _ = _slot_arg(context)
-    loc = store.remove_location(context.user_data, index) if index is not None else None
+    loc = store.remove_location(_user_data(context), index) if index is not None else None
     if loc is None:
         await message.reply_text("Usage: /remove N – see /locations for slot numbers.")
         return
@@ -420,11 +442,10 @@ async def cmd_remove(update: Update, context: Context) -> None:
 
 
 async def cmd_rename(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     index, alias = _slot_arg(context)
     loc = (
-        store.rename_location(context.user_data, index, alias[:30])
+        store.rename_location(_user_data(context), index, alias[:30])
         if index is not None and alias
         else None
     )
@@ -437,17 +458,15 @@ async def cmd_rename(update: Update, context: Context) -> None:
 
 
 async def cmd_units(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     new_units: Units = "imperial" if _units(context) == "metric" else "metric"
-    context.user_data[KEY_UNITS] = new_units
+    _user_data(context)[KEY_UNITS] = new_units
     label = "°F and mph" if new_units == "imperial" else "°C and km/h"
     await message.reply_text(f"Units set to {label}. Send /weather to see it.")
 
 
 async def cmd_help(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     await message.reply_text(HELP, parse_mode=ParseMode.HTML)
 
 
@@ -457,8 +476,8 @@ async def cmd_help(update: Update, context: Context) -> None:
 def _schedule_view(
     context: Context, now: datetime | None = None
 ) -> tuple[str, InlineKeyboardMarkup]:
-    current = sched.get_schedule(context.user_data)
-    default = store.get_default(context.user_data)
+    current = sched.get_schedule(_user_data(context))
+    default = store.get_default(_user_data(context))
     lines = ["<b>⏰ Automatic weather cards</b>"]
     if current:
         lines.append(f"Current: {escape(current.describe())}")
@@ -497,7 +516,7 @@ async def _apply_schedule(
     message: Message, context: Context, *, times: list[str] | tuple[str, ...], preset: str
 ) -> str | None:
     """Store a schedule for this user/chat. Returns an error message, or None on success."""
-    default = store.get_default(context.user_data)
+    default = store.get_default(_user_data(context))
     if default is None:
         return "Save a location first (share it or type a city), then set up the schedule."
     try:
@@ -506,20 +525,19 @@ async def _apply_schedule(
         )
         tz = forecast.timezone
     except WeatherError:
-        previous = sched.get_schedule(context.user_data)
+        previous = sched.get_schedule(_user_data(context))
         tz = previous.tz if previous else "UTC"
     sched.set_schedule(
-        context.user_data, times=times, preset=preset, tz=tz, chat_id=message.chat_id
+        _user_data(context), times=times, preset=preset, tz=tz, chat_id=message.chat_id
     )
     return None
 
 
 async def cmd_schedule(update: Update, context: Context) -> None:
-    message = update.effective_message
-    assert message is not None
+    message = _require_message(update)
     arg = _args(context)
     if arg.lower() in {"off", "stop", "disable"}:
-        removed = sched.clear_schedule(context.user_data)
+        removed = sched.clear_schedule(_user_data(context))
         await message.reply_text(
             "🔕 Automatic cards are off." if removed else "Nothing was scheduled."
         )
@@ -539,31 +557,30 @@ async def cmd_schedule(update: Update, context: Context) -> None:
 
 
 async def on_schedule_callback(update: Update, context: Context) -> None:
-    query = update.callback_query
-    assert query is not None
+    query = _require_query(update)
     message = query.message
     action = (query.data or "").split("|", 1)[-1]
-    if message is None:
+    if not isinstance(message, Message):
         await query.answer("This button has expired. Send /schedule instead.")
         return
 
     if action == "custom":
-        context.user_data[sched.KEY_AWAITING_TIMES] = True
+        _user_data(context)[sched.KEY_AWAITING_TIMES] = True
         await query.answer()
-        await message.reply_text(  # type: ignore[union-attr]
+        await message.reply_text(
             "Send the times you want, separated by spaces, e.g. <code>7:30 13:00 19:00</code>",
             parse_mode=ParseMode.HTML,
         )
         return
     if action == "off":
-        sched.clear_schedule(context.user_data)
+        sched.clear_schedule(_user_data(context))
         await query.answer("🔕 Turned off")
     elif action == "days":
-        result = sched.toggle_days(context.user_data)
+        result = sched.toggle_days(_user_data(context))
         await query.answer("Updated" if result else "Nothing scheduled")
     elif action in sched.PRESETS:
         preset = sched.PRESETS[action]
-        error = await _apply_schedule(message, context, times=preset.times, preset=preset.key)  # type: ignore[arg-type]
+        error = await _apply_schedule(message, context, times=preset.times, preset=preset.key)
         if error:
             await query.answer(error, show_alert=True)
             return
@@ -588,7 +605,7 @@ async def _on_custom_times(message: Message, context: Context, text: str) -> Non
         return
     error = await _apply_schedule(message, context, times=times, preset="custom")
     if error:
-        context.user_data.pop(sched.KEY_AWAITING_TIMES, None)
+        _user_data(context).pop(sched.KEY_AWAITING_TIMES, None)
         await message.reply_text(error)
         return
     view, keyboard = _schedule_view(context)
@@ -599,10 +616,11 @@ async def _on_custom_times(message: Message, context: Context, text: str) -> Non
 
 
 async def on_location(update: Update, context: Context) -> None:
-    message = update.effective_message
+    message = _require_message(update)
     user = update.effective_user
-    assert message is not None and message.location is not None
     loc = message.location
+    if loc is None:
+        raise UnsupportedUpdateError("message has no location")
     await message.chat.send_action(ChatAction.TYPING)
     place = await reverse_geocode(
         _client(context),
@@ -615,11 +633,12 @@ async def on_location(update: Update, context: Context) -> None:
 
 
 async def on_text(update: Update, context: Context) -> None:
-    message = update.effective_message
+    message = _require_message(update)
     user = update.effective_user
-    assert message is not None and message.text is not None
+    if message.text is None:
+        raise UnsupportedUpdateError("message has no text")
     query = message.text.strip()
-    if context.user_data.get(sched.KEY_AWAITING_TIMES):
+    if _user_data(context).get(sched.KEY_AWAITING_TIMES):
         await _on_custom_times(message, context, query)
         return
     if len(query) < 2 or len(query) > 80:
@@ -634,8 +653,8 @@ async def on_text(update: Update, context: Context) -> None:
         )
         return
 
-    setting_up = bool(context.user_data.get(KEY_AWAITING)) or not store.list_locations(
-        context.user_data
+    setting_up = bool(_user_data(context).get(KEY_AWAITING)) or not store.list_locations(
+        _user_data(context)
     )
     if setting_up:
         await _save_and_send(message, context, place)
@@ -673,16 +692,16 @@ def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
 
 async def on_card_callback(update: Update, context: Context) -> None:
     """🔄 Refresh and °C/°F buttons under a card."""
-    query = update.callback_query
-    assert query is not None
+    query = _require_query(update)
     parsed = _parse_callback(query.data)
-    if parsed is None or query.message is None:
+    message = query.message
+    if parsed is None or not isinstance(message, Message):
         await query.answer("This button has expired. Send /weather instead.")
         return
     action, lat, lon = parsed
 
     if action == CB_UNITS:
-        context.user_data[KEY_UNITS] = "imperial" if _units(context) == "metric" else "metric"
+        _user_data(context)[KEY_UNITS] = "imperial" if _units(context) == "metric" else "metric"
     kind: CardKind = "sun" if action == CB_SUN else "weather"
     units = _units(context)
     place = _recall_place(context, lat, lon)
@@ -708,7 +727,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
         if "not modified" in str(exc).lower():
             return
         log.warning("Editing media failed (%s); sending a new photo instead", exc)
-        await query.message.reply_photo(  # type: ignore[union-attr]
+        await message.reply_photo(
             photo=png,
             caption=caption_for(place, forecast, kind),
             parse_mode=ParseMode.HTML,
@@ -718,11 +737,10 @@ async def on_card_callback(update: Update, context: Context) -> None:
 
 async def on_slot_callback(update: Update, context: Context) -> None:
     """Buttons in the /locations list and the 📍 My locations button under a card."""
-    query = update.callback_query
-    assert query is not None
+    query = _require_query(update)
     parsed = _parse_slot_callback(query.data)
     message = query.message
-    if parsed is None or message is None:
+    if parsed is None or not isinstance(message, Message):
         await query.answer("This button has expired. Send /locations instead.")
         return
     action, index = parsed
@@ -730,23 +748,23 @@ async def on_slot_callback(update: Update, context: Context) -> None:
     if action == CB_LIST:
         await query.answer()
         text, keyboard = _locations_view(context)
-        await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)  # type: ignore[union-attr]
+        await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         return
 
     if action == CB_WEATHER_SLOT:
-        locs = store.list_locations(context.user_data)
+        locs = store.list_locations(_user_data(context))
         if not 0 <= index < len(locs):
             await query.answer("That slot no longer exists.", show_alert=True)
             return
         await query.answer("Fetching…")
-        await _send_card(message, context, card_place(locs[index]))  # type: ignore[arg-type]
+        await _send_card(message, context, card_place(locs[index]))
         return
 
     if action == CB_DEFAULT_SLOT:
-        loc = store.set_default(context.user_data, index)
+        loc = store.set_default(_user_data(context), index)
         await query.answer(f"⭐ Default: {loc.label}" if loc else "That slot no longer exists.")
     elif action == CB_REMOVE_SLOT:
-        loc = store.remove_location(context.user_data, index)
+        loc = store.remove_location(_user_data(context), index)
         await query.answer(f"🗑 Removed {loc.label}" if loc else "That slot no longer exists.")
     else:
         await query.answer()
@@ -776,8 +794,8 @@ async def on_error(update: object, context: Context) -> None:
 
 def make_post_init(
     http_factory: Callable[[], httpx.AsyncClient],
-) -> Callable[[Application], Awaitable[None]]:
-    async def post_init(app: Application) -> None:
+) -> Callable[[App], Awaitable[None]]:
+    async def post_init(app: App) -> None:
         runtime.set_http(http_factory())
         app.bot_data.pop("http", None)  # left behind by versions < 1.1; never persistable
         await sync_identity(app.bot)
@@ -785,11 +803,9 @@ def make_post_init(
     return post_init
 
 
-async def post_shutdown(app: Application) -> None:
-    try:
+async def post_shutdown(app: App) -> None:
+    with contextlib.suppress(RuntimeError):  # client was never initialised
         await runtime.http().aclose()
-    except RuntimeError:
-        pass
     runtime.set_http(None)
 
 
@@ -797,7 +813,7 @@ async def post_shutdown(app: Application) -> None:
 NOT_EDITED = ~filters.UpdateType.EDITED_MESSAGE
 
 
-def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
+def register_handlers(app: App) -> None:
     app.add_handler(CommandHandler("start", cmd_start, filters=NOT_EDITED))
     app.add_handler(CommandHandler(["add", "setup"], cmd_add, filters=NOT_EDITED))
     app.add_handler(

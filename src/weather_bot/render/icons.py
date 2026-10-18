@@ -183,13 +183,11 @@ def _draw(pen: _Pen, kind: IconKind, is_day: bool) -> None:
         sky(36, 34, 17)
         pen.cloud(56, 50, 54, CLOUD, CLOUD_SHADE)
         pen.flakes(56, 78, 30, 3, 5)
-    elif kind == "thunder":
+    else:  # "thunder", the last member of IconKind
         pen.cloud(50, 36, 62, STORM, STORM_SHADE)
         pen.drops(30, 62, 10, 2, 13)
         pen.drops(72, 62, 10, 2, 13)
         pen.bolt(50, 54, 36)
-    else:
-        pen.cloud(50, 50, 60, CLOUD, CLOUD_SHADE)
 
 
 @lru_cache(maxsize=128)

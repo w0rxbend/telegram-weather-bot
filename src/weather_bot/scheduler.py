@@ -14,21 +14,17 @@ import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
 
 from telegram.constants import ParseMode
 from telegram.error import Forbidden, TelegramError
-from telegram.ext import Application
 
 from weather_bot import locations as store
 from weather_bot import schedule as sched
-from weather_bot.bot import build_card, caption_for, card_keyboard, card_place
+from weather_bot.bot import App, build_card, caption_for, card_keyboard, card_place
 from weather_bot.schedule import UserData
 from weather_bot.weather import WeatherError
 
 log = logging.getLogger(__name__)
-
-App = Application[Any, Any, Any, Any, Any, Any]
 
 INTERVAL = 30.0
 MAX_CONCURRENT_SENDS = 5  # each send fetches a forecast and renders a card
@@ -112,11 +108,11 @@ async def _send(app: App, user_id: int, data: UserData) -> None:
         log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
 
 
-def start(app: App, interval: float = INTERVAL) -> asyncio.Task:
+def start(app: App, interval: float = INTERVAL) -> asyncio.Task[None]:
     return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
 
 
-async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:
+async def stop(task: asyncio.Task[None] | None, on_done: Callable[[], None] | None = None) -> None:
     if task is None:
         return
     task.cancel()

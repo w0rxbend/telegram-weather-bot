@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from telegram import Message
 
 from weather_bot import bot
 from weather_bot import locations as store
@@ -200,6 +201,7 @@ async def test_locations_list_default_remove_rename() -> None:
 
 def make_query(data: str) -> MagicMock:
     query = MagicMock()
+    query.message = MagicMock(spec=Message)  # handlers reject inaccessible messages
     query.data = data
     query.answer = AsyncMock()
     query.edit_message_media = AsyncMock()
@@ -384,3 +386,18 @@ def test_resolve_does_not_crash_on_unicode_digits() -> None:
     ctx = make_context()
     store.add_location(ctx.user_data, KYIV, "home")
     assert store.resolve(ctx.user_data, "²") is None
+
+
+async def test_handler_without_message_raises_even_under_python_O() -> None:
+    update = SimpleNamespace(effective_message=None, effective_user=None)
+    with pytest.raises(bot.UnsupportedUpdateError):
+        await bot.cmd_help(update, make_context())
+
+
+async def test_callback_on_inaccessible_message_is_answered_as_expired() -> None:
+    query = make_query("r|50.4500|30.5200")
+    query.message = MagicMock()  # not a telegram.Message: the original message is too old
+    await bot.on_card_callback(SimpleNamespace(callback_query=query), make_context())
+    query.answer.assert_awaited_once()
+    assert "expired" in query.answer.await_args.args[0]
+    query.edit_message_media.assert_not_awaited()

@@ -140,7 +140,7 @@ class Canvas:
     # -- images -------------------------------------------------------------------------
 
     def icon(self, kind: str, is_day: bool, size: int, x: float, y: float) -> None:
-        im = icons.icon(kind, is_day, self.px(size))  # type: ignore[arg-type]
+        im = icons.icon(kind, is_day, self.px(size))
         self.composite(im, x, y)
 
     def finish(self) -> Image.Image:
