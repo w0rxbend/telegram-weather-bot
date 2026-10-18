@@ -354,3 +354,37 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
     query = make_query("sch|off")
     await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
     assert bot.sched.get_schedule(ctx.user_data) is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    ["r|nan|30", "r|50|inf", "r|91|30", "r|50|-181", "r|1e400|1", "r|50", "r|a|b|c", None],
+)
+def test_card_callback_rejects_bad_coordinates(data: str | None) -> None:
+    assert bot._parse_callback(data) is None
+
+
+def test_card_callback_accepts_valid_coordinates() -> None:
+    assert bot._parse_callback("r|-90.0000|180.0000") == ("r", -90.0, 180.0)
+
+
+@pytest.mark.parametrize("arg", ["²", "٣", "①", "1.5", "-1"])
+def test_slot_arg_ignores_non_ascii_digits(arg: str) -> None:
+    ctx = make_context(args=[arg, "x"])
+    assert bot._slot_arg(ctx)[0] is None
+
+
+def test_slot_arg_parses_ascii_digits() -> None:
+    assert bot._slot_arg(make_context(args=["3", "home", "x"])) == (2, "home x")
+
+
+def test_handlers_ignore_edited_messages_and_channel_posts() -> None:
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler
+
+    app = ApplicationBuilder().token("1:test").build()
+    bot.register_handlers(app)
+    for handler in app.handlers[0]:
+        if isinstance(handler, CommandHandler | MessageHandler):
+            text = repr(handler.filters)
+            assert "UpdateType.MESSAGE" in text, handler
+            assert "UpdateType.MESSAGES" not in text, handler

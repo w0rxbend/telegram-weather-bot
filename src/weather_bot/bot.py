@@ -67,6 +67,9 @@ KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
 
+MAX_LATITUDE = 90.0
+MAX_LONGITUDE = 180.0
+
 CB_REFRESH = "r"
 CB_UNITS = "u"
 CB_SUN = "s"
@@ -358,7 +361,7 @@ async def cmd_locations(update: Update, context: Context) -> None:
 def _slot_arg(context: Context) -> tuple[int | None, str]:
     """Parse ``/cmd N [rest]`` into a 0-based index and the remaining text."""
     args = context.args or []
-    if not args or not args[0].isdigit():
+    if not args or not (args[0].isascii() and args[0].isdigit()):
         return None, " ".join(args[1:])
     return int(args[0]) - 1, " ".join(args[1:]).strip()
 
@@ -619,9 +622,15 @@ async def on_text(update: Update, context: Context) -> None:
 def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
     try:
         action, lat, lon = (data or "").split("|")
-        return action, float(lat), float(lon)
+        latitude, longitude = float(lat), float(lon)
     except ValueError:
         return None
+    # callback_data is client-controlled; reject NaN/inf and out-of-range coordinates
+    if not (
+        -MAX_LATITUDE <= latitude <= MAX_LATITUDE and -MAX_LONGITUDE <= longitude <= MAX_LONGITUDE
+    ):
+        return None
+    return action, latitude, longitude
 
 
 def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
@@ -760,19 +769,26 @@ async def post_shutdown(app: Application) -> None:
 
 
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler(["add", "setup"], cmd_add))
-    app.add_handler(CommandHandler(["weather", "now", "w"], cmd_weather))
-    app.add_handler(CommandHandler(["sun", "sunset", "sunrise"], cmd_sun))
-    app.add_handler(CommandHandler(["locations", "list"], cmd_locations))
-    app.add_handler(CommandHandler("default", cmd_default))
-    app.add_handler(CommandHandler(["remove", "delete"], cmd_remove))
-    app.add_handler(CommandHandler("rename", cmd_rename))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
-    app.add_handler(CommandHandler("units", cmd_units))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(MessageHandler(filters.LOCATION, on_location))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    commands: list[tuple[str | list[str], Callable[..., Awaitable[None]]]] = [
+        ("start", cmd_start),
+        (["add", "setup"], cmd_add),
+        (["weather", "now", "w"], cmd_weather),
+        (["sun", "sunset", "sunrise"], cmd_sun),
+        (["locations", "list"], cmd_locations),
+        ("default", cmd_default),
+        (["remove", "delete"], cmd_remove),
+        ("rename", cmd_rename),
+        ("schedule", cmd_schedule),
+        ("units", cmd_units),
+        ("help", cmd_help),
+    ]
+    for names, callback in commands:
+        # new messages only: edited messages and channel posts have no usable user_data
+        app.add_handler(CommandHandler(names, callback, filters=filters.UpdateType.MESSAGE))
+    app.add_handler(MessageHandler(filters.LOCATION & filters.UpdateType.MESSAGE, on_location))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.UpdateType.MESSAGE, on_text)
+    )
     app.add_handler(
         CallbackQueryHandler(on_card_callback, pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|")
     )
