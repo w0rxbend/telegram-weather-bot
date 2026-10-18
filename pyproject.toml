@@ -28,11 +28,17 @@ include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
 pytest-asyncio = ">=0.24"
+pytest-cov = ">=5.0"
 ruff = ">=0.6"
+mypy = ">=1.11"
+bandit = ">=1.7"
+pip-audit = ">=2.7"
+pre-commit = ">=3.8"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
@@ -40,4 +46,29 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "S", "BLE", "ANN", "C4", "SIM", "RET", "PTH", "ASYNC", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "S105", "S106"]
+"scripts/**" = ["T201", "ANN"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.coverage.run]
+source = ["weather_bot"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]
