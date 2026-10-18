@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from functools import wraps
@@ -65,6 +66,8 @@ KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
+MAX_LATITUDE = 90.0
+MAX_LONGITUDE = 180.0
 
 CB_REFRESH = "r"
 CB_UNITS = "u"
@@ -382,7 +385,7 @@ async def cmd_locations(update: Update, context: Context) -> None:
 def _slot_arg(context: Context) -> tuple[int | None, str]:
     """Parse ``/cmd N [rest]`` into a 0-based index and the remaining text."""
     args = context.args or []
-    if not args or not args[0].isdigit():
+    if not args or not (args[0].isascii() and args[0].isdigit()):
         return None, " ".join(args[1:])
     return int(args[0]) - 1, " ".join(args[1:]).strip()
 
@@ -645,19 +648,27 @@ async def on_text(update: Update, context: Context) -> None:
 
 
 def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
+    """Parse ``action|lat|lon``; callback data is client-controlled, so range-check it."""
     try:
-        action, lat, lon = (data or "").split("|")
-        return action, float(lat), float(lon)
+        action, lat_text, lon_text = (data or "").split("|")
+        lat, lon = float(lat_text), float(lon_text)
     except ValueError:
         return None
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        return None
+    if not (-MAX_LATITUDE <= lat <= MAX_LATITUDE and -MAX_LONGITUDE <= lon <= MAX_LONGITUDE):
+        return None
+    return action, lat, lon
 
 
 def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
     try:
         action, index = (data or "").split("|")
-        return action, int(index)
     except ValueError:
         return None
+    if not (index.isascii() and index.isdigit()):
+        return None
+    return action, int(index)
 
 
 async def on_card_callback(update: Update, context: Context) -> None:

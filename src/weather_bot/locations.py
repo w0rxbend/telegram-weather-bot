@@ -147,7 +147,7 @@ def resolve(user_data: UserData, query: str | None) -> SavedLocation | None:
     if not query:
         return get_default(user_data)
     locations = list_locations(user_data)
-    if query.isdigit():
+    if query.isascii() and query.isdigit():  # str.isdigit() also accepts '²', int() does not
         slot = int(query)
         return locations[slot - 1] if 1 <= slot <= len(locations) else None
     q = query.lower()

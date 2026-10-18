@@ -354,3 +354,31 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
     query = make_query("sch|off")
     await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
     assert bot.sched.get_schedule(ctx.user_data) is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    ["r|nan|30", "r|50|inf", "r|91|30", "r|50|-181", "r|1e999|0", "r|50", "r|1|2|3", "", None],
+)
+def test_parse_callback_rejects_untrusted_coordinates(data: str | None) -> None:
+    assert bot._parse_callback(data) is None
+
+
+def test_parse_callback_accepts_boundaries() -> None:
+    assert bot._parse_callback("s|-90.0000|180.0000") == ("s", -90.0, 180.0)
+
+
+@pytest.mark.parametrize("data", ["d|²", "d|-1", "d|", "d|1.5"])
+def test_parse_slot_callback_rejects_non_ascii_digits_and_junk(data: str) -> None:
+    assert bot._parse_slot_callback(data) is None
+
+
+def test_slot_arg_ignores_unicode_digits() -> None:
+    ctx = make_context(args=["²", "x"])
+    assert bot._slot_arg(ctx) == (None, "x")
+
+
+def test_resolve_does_not_crash_on_unicode_digits() -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, KYIV, "home")
+    assert store.resolve(ctx.user_data, "²") is None
