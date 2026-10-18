@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from html import escape
@@ -66,6 +67,8 @@ KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
+MAX_LATITUDE = 90.0
+MAX_LONGITUDE = 180.0
 
 CB_REFRESH = "r"
 CB_UNITS = "u"
@@ -625,10 +628,15 @@ async def on_text(update: Update, context: Context) -> None:
 
 def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
     try:
-        action, lat, lon = (data or "").split("|")
-        return action, float(lat), float(lon)
+        action, raw_lat, raw_lon = (data or "").split("|")
+        lat, lon = float(raw_lat), float(raw_lon)
     except ValueError:
         return None
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        return None
+    if not (-MAX_LATITUDE <= lat <= MAX_LATITUDE and -MAX_LONGITUDE <= lon <= MAX_LONGITUDE):
+        return None
+    return action, lat, lon
 
 
 def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
@@ -660,8 +668,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Refresh failed: %s", exc)
-        await query.answer(
-            "Weather service is unavailable right now, try again shortly.", show_alert=True
+        # The query was already answered above; a second answer would raise BadRequest.
+        await query.message.reply_text(  # type: ignore[union-attr]
+            "Weather service is unavailable right now, try again shortly."
         )
         return
 

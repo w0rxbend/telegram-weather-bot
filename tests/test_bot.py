@@ -354,3 +354,25 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
     query = make_query("sch|off")
     await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
     assert bot.sched.get_schedule(ctx.user_data) is None
+
+
+@pytest.mark.parametrize("data", ["r|nan|1", "r|inf|1", "r|1|-inf", "r|91|0", "r|0|181", "r|1|2|3"])
+def test_parse_callback_rejects_invalid_coordinates(data: str) -> None:
+    assert bot._parse_callback(data) is None
+
+
+def test_parse_callback_accepts_boundaries() -> None:
+    assert bot._parse_callback("r|-90|180") == ("r", -90.0, 180.0)
+
+
+async def test_refresh_failure_answers_the_query_only_once() -> None:
+    query = MagicMock()
+    query.data = "r|50.4500|30.5200"
+    query.answer = AsyncMock()
+    query.message.reply_text = AsyncMock()
+    update = SimpleNamespace(callback_query=query)
+    failing = AsyncMock(side_effect=bot.WeatherError("down"))
+    with patch.object(bot, "_build_card", failing):
+        await bot.on_card_callback(update, make_context())  # type: ignore[arg-type]
+    query.answer.assert_awaited_once()
+    query.message.reply_text.assert_awaited_once()
