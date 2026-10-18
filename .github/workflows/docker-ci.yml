@@ -5,16 +5,34 @@ on:
     branches: ["main"]
   workflow_dispatch:  # manual redeploy from the Actions tab (e.g. after rotating TG_BOT_TOKEN)
 
+permissions:
+  contents: read
+
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot:latest
   APP_DIR: docker-deployments/apps/bots/telegram/telegram-weather-bot
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Poetry
+        run: pipx install "poetry>=2.0,<3"
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Test
+        run: poetry run pytest -q
+
   build-and-deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Notify me (commit)
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@214f06cfa3d3a588c1472116889437e7c6fd29b1 # v1.1.1
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -47,7 +65,7 @@ jobs:
           push: true
           tags: ${{ env.IMAGE }}
       - name: Notify me (image update)
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@214f06cfa3d3a588c1472116889437e7c6fd29b1 # v1.1.1
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -60,7 +78,7 @@ jobs:
 
             🐋 https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot/tags
       - name: Copy compose file to remote machine
-        uses: appleboy/scp-action@v1
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -70,22 +88,24 @@ jobs:
           target: ${{ env.APP_DIR }}
       - id: deploy
         name: Connect to remote machine and deploy
-        uses: appleboy/ssh-action@v1
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          WEATHER_BOT_IMAGE: ${{ env.IMAGE }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
+          envs: TG_BOT_TOKEN,WEATHER_BOT_IMAGE
           script: |
-            export TG_BOT_TOKEN=${{ secrets.TG_BOT_TOKEN }}
-            export WEATHER_BOT_IMAGE=${{ env.IMAGE }}
             cd $PWD/${{ env.APP_DIR }}
             docker pull $WEATHER_BOT_IMAGE
             docker compose up -d
             docker system prune -f
       - name: Notify me
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@214f06cfa3d3a588c1472116889437e7c6fd29b1 # v1.1.1
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
