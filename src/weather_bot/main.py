@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import pickle  # nosec B403 - state file is written only by this bot
+import pickle  # nosec B403
 import time
 from pathlib import Path
 from typing import Any
@@ -26,9 +26,11 @@ def quarantine_corrupt_state(path: Path) -> None:
     """Move an unreadable pickle aside so a bad file cannot crash-loop the bot."""
     if not path.exists():
         return
+    # Trusted input: only this bot writes the file (0700 directory, 0600 file) and PTB loads
+    # the very same bytes with pickle right after this check.
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)  # noqa: S301  # nosec B301 - only this bot writes the file (0700 dir, 0600 file)
+            pickle.load(fh)  # noqa: S301  # nosec B301
     except Exception:
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
