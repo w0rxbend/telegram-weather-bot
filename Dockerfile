@@ -9,7 +9,7 @@ RUN pip install "poetry>=2.0,<3" poetry-plugin-export
 
 WORKDIR /build
 COPY pyproject.toml poetry.lock ./
-RUN poetry export -f requirements.txt --without-hashes -o requirements.txt
+RUN poetry export -f requirements.txt --without-hashes --without dev -o requirements.txt
 
 
 # ---- runtime -------------------------------------------------------------------------------
