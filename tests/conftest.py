@@ -27,8 +27,9 @@ def _stub_http_client():
 
     from weather_bot import runtime
 
+    runtime.reset()
     runtime.set_http(
         httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     )
     yield
-    runtime.set_http(None)
+    runtime.reset()

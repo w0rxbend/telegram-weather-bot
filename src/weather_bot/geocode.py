@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from weather_bot.ratelimit import MinIntervalGate
+
 log = logging.getLogger(__name__)
 
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -39,14 +41,23 @@ def _pick_locality(address: dict[str, str]) -> str | None:
 
 
 async def reverse_geocode(
-    client: httpx.AsyncClient, latitude: float, longitude: float, language: str | None = None
+    client: httpx.AsyncClient,
+    latitude: float,
+    longitude: float,
+    language: str | None = None,
+    gate: MinIntervalGate | None = None,
 ) -> Place:
-    """Return a human-readable place for the coordinates; never raises."""
+    """Return a human-readable place for the coordinates; never raises.
+
+    ``gate`` spaces calls out to respect Nominatim's one-request-per-second policy.
+    """
     fallback = Place(
         name=f"{latitude:.3f}, {longitude:.3f}", latitude=latitude, longitude=longitude
     )
     params = {"lat": f"{latitude:.6f}", "lon": f"{longitude:.6f}", "format": "jsonv2", "zoom": 12}
     headers = {"Accept-Language": language or "en"}
+    if gate is not None:
+        await gate.wait()
     try:
         response = await client.get(NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()

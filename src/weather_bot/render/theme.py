@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 
 from weather_bot.weather import IconKind
-import itertools
 
 RGB = tuple[int, int, int]
 

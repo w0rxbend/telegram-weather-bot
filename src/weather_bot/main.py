@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import httpx
-from telegram.ext import ApplicationBuilder, PicklePersistence
+from telegram.ext import AIORateLimiter, ApplicationBuilder, PicklePersistence
 
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
@@ -59,6 +59,7 @@ def start() -> None:
         ApplicationBuilder()
         .token(settings.bot_token)
         .persistence(PicklePersistence(filepath=settings.persistence_file))
+        .rate_limiter(AIORateLimiter(max_retries=3))
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)

@@ -7,6 +7,7 @@ downsampled with Lanczos so every edge and glyph is antialiased.
 from __future__ import annotations
 
 import io
+import itertools
 from datetime import datetime
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -23,7 +24,6 @@ from weather_bot.render.theme import (
     uv_label,
 )
 from weather_bot.weather import DayPoint, Forecast, HourPoint, compass, describe, icon_kind
-import itertools
 
 WIDTH, HEIGHT = 1080, 1600
 SCALE = 2

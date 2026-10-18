@@ -21,6 +21,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import wraps
 from html import escape
 from typing import Any, Literal
 
@@ -108,6 +109,31 @@ HELP = (
     "/schedule 7:30 18:00 – custom times · /schedule off – stop\n\n"
     "Typing any city name shows its weather without saving it."
 )
+
+
+# --- rate limiting -----------------------------------------------------------------------
+
+
+def throttled(
+    handler: Callable[[Update, Context], Awaitable[None]],
+) -> Callable[[Update, Context], Awaitable[None]]:
+    """Per-user cooldown for handlers that hit external services or render cards.
+
+    Messages inside the cooldown are dropped silently (answering would amplify a flood);
+    callback queries are always answered so the client's spinner stops.
+    """
+
+    @wraps(handler)
+    async def wrapper(update: Update, context: Context) -> None:
+        user = update.effective_user
+        if user is not None and runtime.cooldown().retry_after(user.id) > 0:
+            log.info("Throttled update %s", update.update_id)
+            if update.callback_query is not None:
+                await update.callback_query.answer("Easy there – try again in a moment.")
+            return
+        await handler(update, context)
+
+    return wrapper
 
 
 # --- helpers -----------------------------------------------------------------------------
@@ -576,7 +602,11 @@ async def on_location(update: Update, context: Context) -> None:
     loc = message.location
     await message.chat.send_action(ChatAction.TYPING)
     place = await reverse_geocode(
-        _client(context), loc.latitude, loc.longitude, user.language_code if user else None
+        _client(context),
+        loc.latitude,
+        loc.longitude,
+        user.language_code if user else None,
+        gate=runtime.nominatim_gate(),
     )
     await _save_and_send(message, context, place)
 
@@ -753,25 +783,29 @@ async def post_shutdown(app: Application) -> None:
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler(["add", "setup"], cmd_add))
-    app.add_handler(CommandHandler(["weather", "now", "w"], cmd_weather))
-    app.add_handler(CommandHandler(["sun", "sunset", "sunrise"], cmd_sun))
+    app.add_handler(CommandHandler(["weather", "now", "w"], throttled(cmd_weather)))
+    app.add_handler(CommandHandler(["sun", "sunset", "sunrise"], throttled(cmd_sun)))
     app.add_handler(CommandHandler(["locations", "list"], cmd_locations))
     app.add_handler(CommandHandler("default", cmd_default))
     app.add_handler(CommandHandler(["remove", "delete"], cmd_remove))
     app.add_handler(CommandHandler("rename", cmd_rename))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
+    app.add_handler(CommandHandler("schedule", throttled(cmd_schedule)))
     app.add_handler(CommandHandler("units", cmd_units))
     app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(MessageHandler(filters.LOCATION, on_location))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(filters.LOCATION, throttled(on_location)))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, throttled(on_text)))
     app.add_handler(
-        CallbackQueryHandler(on_card_callback, pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|")
+        CallbackQueryHandler(
+            throttled(on_card_callback), pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|"
+        )
     )
     app.add_handler(
         CallbackQueryHandler(
-            on_slot_callback,
+            throttled(on_slot_callback),
             pattern=rf"^({CB_WEATHER_SLOT}|{CB_DEFAULT_SLOT}|{CB_REMOVE_SLOT}|{CB_LIST})\|",
         )
     )
-    app.add_handler(CallbackQueryHandler(on_schedule_callback, pattern=rf"^{CB_SCHEDULE}\|"))
+    app.add_handler(
+        CallbackQueryHandler(throttled(on_schedule_callback), pattern=rf"^{CB_SCHEDULE}\|")
+    )
     app.add_error_handler(on_error)
