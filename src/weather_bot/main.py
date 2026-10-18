@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import pickle
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
-from telegram.ext import AIORateLimiter, ApplicationBuilder, PicklePersistence
+from telegram.ext import AIORateLimiter, Application, ApplicationBuilder, PicklePersistence
 
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
@@ -26,7 +28,7 @@ def quarantine_corrupt_state(path: Path) -> None:
         return
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)
+            pickle.load(fh)  # noqa: S301 - only this bot writes the file (0700 dir, 0600 file)
     except Exception:
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
@@ -49,13 +51,13 @@ def start() -> None:
         )
 
     bot_post_init = make_post_init(http_factory)
-    scheduler_task: list = []
+    scheduler_task: list[asyncio.Task[None]] = []
 
-    async def post_init(app) -> None:
+    async def post_init(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:
+    async def post_stop(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

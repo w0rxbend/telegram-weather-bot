@@ -61,7 +61,7 @@ def test_recall_prefers_saved_slot_label() -> None:
 
 
 def test_keyboard_and_callback_parsing() -> None:
-    kb = bot._keyboard(KYIV, "metric")
+    kb = bot.card_keyboard(KYIV, "metric")
     refresh, units = kb.inline_keyboard[0]
     assert refresh.callback_data == "r|50.4500|30.5200"
     assert units.text == "Show in °F"
@@ -279,7 +279,9 @@ async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
     assert buttons[0][1].callback_data == "r|50.4500|30.5200"  # switch to weather card
 
     # weather card carries a button to the sun card; pressing it edits in place
-    assert bot._keyboard(KYIV, "metric").inline_keyboard[1][0].callback_data == "s|50.4500|30.5200"
+    assert (
+        bot.card_keyboard(KYIV, "metric").inline_keyboard[1][0].callback_data == "s|50.4500|30.5200"
+    )
     query = make_query("s|50.4500|30.5200")
     with (
         patch.object(bot, "fetch_forecast", AsyncMock(return_value=forecast)),

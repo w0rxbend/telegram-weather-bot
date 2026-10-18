@@ -175,11 +175,11 @@ def _recall_place(context: Context, lat: float, lon: float) -> Place:
     return Place(name=name or f"{lat:.3f}, {lon:.3f}", latitude=lat, longitude=lon)
 
 
-def _card_place(loc: SavedLocation) -> Place:
+def card_place(loc: SavedLocation) -> Place:
     return Place(name=loc.card_name, latitude=loc.place.latitude, longitude=loc.place.longitude)
 
 
-def _keyboard(place: Place, units: Units, kind: CardKind = "weather") -> InlineKeyboardMarkup:
+def card_keyboard(place: Place, units: Units, kind: CardKind = "weather") -> InlineKeyboardMarkup:
     coords = f"{place.latitude:.4f}|{place.longitude:.4f}"
     other = "°F" if units == "metric" else "°C"
     if kind == "sun":
@@ -201,7 +201,7 @@ def _keyboard(place: Place, units: Units, kind: CardKind = "weather") -> InlineK
     return InlineKeyboardMarkup(rows)
 
 
-def _caption(place: Place, fc: Forecast, kind: CardKind = "weather") -> str:
+def caption_for(place: Place, fc: Forecast, kind: CardKind = "weather") -> str:
     if kind == "sun":
         return build_sun_caption(place.name, fc)
     return build_caption(place.name, fc)
@@ -241,7 +241,7 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
-async def _build_card(
+async def build_card(
     place: Place, units: Units, kind: CardKind = "weather"
 ) -> tuple[bytes, Forecast]:
     forecast = await fetch_forecast(runtime.http(), place.latitude, place.longitude, units)
@@ -262,7 +262,7 @@ async def _send_card(
     units = _units(context)
     await message.chat.send_action(ChatAction.UPLOAD_PHOTO)
     try:
-        png, forecast = await _build_card(place, units, kind)
+        png, forecast = await build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Forecast failed: %s", exc)
         await message.reply_text(
@@ -278,9 +278,9 @@ async def _send_card(
         )
     await message.reply_photo(
         photo=png,
-        caption=_caption(place, forecast, kind),
+        caption=caption_for(place, forecast, kind),
         parse_mode=ParseMode.HTML,
-        reply_markup=_keyboard(place, units, kind),
+        reply_markup=card_keyboard(place, units, kind),
     )
 
 
@@ -299,7 +299,7 @@ async def _save_and_send(message: Message, context: Context, place: Place) -> No
         intro += " (default)"
     else:
         intro += f"\nUse <code>/weather {loc.slot}</code> or <code>/default {loc.slot}</code>."
-    await _send_card(message, context, _card_place(loc), intro=intro)
+    await _send_card(message, context, card_place(loc), intro=intro)
 
 
 def _ask_for_location(context: Context, alias: str | None = None) -> None:
@@ -372,7 +372,7 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
             f"No saved location matches “{query}”. Send /locations to see your slots."
         )
         return
-    await _send_card(message, context, _card_place(loc), kind=kind)
+    await _send_card(message, context, card_place(loc), kind=kind)
 
 
 async def cmd_locations(update: Update, context: Context) -> None:
@@ -689,7 +689,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
 
     await query.answer("Refreshing…")
     try:
-        png, forecast = await _build_card(place, units, kind)
+        png, forecast = await build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Refresh failed: %s", exc)
         await query.answer(
@@ -700,9 +700,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         await query.edit_message_media(
             media=InputMediaPhoto(
-                media=png, caption=_caption(place, forecast, kind), parse_mode=ParseMode.HTML
+                media=png, caption=caption_for(place, forecast, kind), parse_mode=ParseMode.HTML
             ),
-            reply_markup=_keyboard(place, units, kind),
+            reply_markup=card_keyboard(place, units, kind),
         )
     except BadRequest as exc:
         if "not modified" in str(exc).lower():
@@ -710,9 +710,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
         log.warning("Editing media failed (%s); sending a new photo instead", exc)
         await query.message.reply_photo(  # type: ignore[union-attr]
             photo=png,
-            caption=_caption(place, forecast, kind),
+            caption=caption_for(place, forecast, kind),
             parse_mode=ParseMode.HTML,
-            reply_markup=_keyboard(place, units, kind),
+            reply_markup=card_keyboard(place, units, kind),
         )
 
 
@@ -739,7 +739,7 @@ async def on_slot_callback(update: Update, context: Context) -> None:
             await query.answer("That slot no longer exists.", show_alert=True)
             return
         await query.answer("Fetching…")
-        await _send_card(message, context, _card_place(locs[index]))  # type: ignore[arg-type]
+        await _send_card(message, context, card_place(locs[index]))  # type: ignore[arg-type]
         return
 
     if action == CB_DEFAULT_SLOT:

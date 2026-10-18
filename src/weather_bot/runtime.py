@@ -49,5 +49,5 @@ def nominatim_gate() -> MinIntervalGate:
 
 def reset() -> None:
     """Forget all process-wide state (used by tests)."""
-    global _state
+    global _state  # noqa: PLW0603 - reset() rebinds the single state holder
     _state = _State()
