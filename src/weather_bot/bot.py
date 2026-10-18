@@ -38,7 +38,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -264,7 +264,7 @@ async def _send_card(
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Forecast failed for %s: %s", place, exc)
+        log.warning("Forecast failed: %s", exc)
         await message.reply_text(
             "I couldn't reach the weather service right now. Please try again in a minute.",
             reply_markup=ReplyKeyboardRemove() if intro else None,
@@ -691,7 +691,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Refresh failed for %s: %s", place, exc)
+        log.warning("Refresh failed: %s", exc)
         await query.answer(
             "Weather service is unavailable right now, try again shortly.", show_alert=True
         )
@@ -761,12 +761,14 @@ async def on_slot_callback(update: Update, context: Context) -> None:
 
 
 async def on_error(update: object, context: Context) -> None:
-    log.exception("Unhandled error while processing update %s", update, exc_info=context.error)
+    # Log the update id only: a full Update carries message text and coordinates (PII).
+    update_id = update.update_id if isinstance(update, Update) else None
+    log.error("Unhandled error while processing update %s", update_id, exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text("Something went wrong. Please try again.")
-        except Exception:  # noqa: BLE001 - best effort only
-            pass
+        except TelegramError:
+            log.warning("Could not deliver the error notice for update %s", update_id)
 
 
 # --- wiring ------------------------------------------------------------------------------
@@ -791,20 +793,30 @@ async def post_shutdown(app: Application) -> None:
     runtime.set_http(None)
 
 
+# Edited messages (including every tick of a live-location share) must not re-run commands.
+NOT_EDITED = ~filters.UpdateType.EDITED_MESSAGE
+
+
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler(["add", "setup"], cmd_add))
-    app.add_handler(CommandHandler(["weather", "now", "w"], throttled(cmd_weather)))
-    app.add_handler(CommandHandler(["sun", "sunset", "sunrise"], throttled(cmd_sun)))
-    app.add_handler(CommandHandler(["locations", "list"], cmd_locations))
-    app.add_handler(CommandHandler("default", cmd_default))
-    app.add_handler(CommandHandler(["remove", "delete"], cmd_remove))
-    app.add_handler(CommandHandler("rename", cmd_rename))
-    app.add_handler(CommandHandler("schedule", throttled(cmd_schedule)))
-    app.add_handler(CommandHandler("units", cmd_units))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(MessageHandler(filters.LOCATION, throttled(on_location)))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, throttled(on_text)))
+    app.add_handler(CommandHandler("start", cmd_start, filters=NOT_EDITED))
+    app.add_handler(CommandHandler(["add", "setup"], cmd_add, filters=NOT_EDITED))
+    app.add_handler(
+        CommandHandler(["weather", "now", "w"], throttled(cmd_weather), filters=NOT_EDITED)
+    )
+    app.add_handler(
+        CommandHandler(["sun", "sunset", "sunrise"], throttled(cmd_sun), filters=NOT_EDITED)
+    )
+    app.add_handler(CommandHandler(["locations", "list"], cmd_locations, filters=NOT_EDITED))
+    app.add_handler(CommandHandler("default", cmd_default, filters=NOT_EDITED))
+    app.add_handler(CommandHandler(["remove", "delete"], cmd_remove, filters=NOT_EDITED))
+    app.add_handler(CommandHandler("rename", cmd_rename, filters=NOT_EDITED))
+    app.add_handler(CommandHandler("schedule", throttled(cmd_schedule), filters=NOT_EDITED))
+    app.add_handler(CommandHandler("units", cmd_units, filters=NOT_EDITED))
+    app.add_handler(CommandHandler("help", cmd_help, filters=NOT_EDITED))
+    app.add_handler(MessageHandler(filters.LOCATION & NOT_EDITED, throttled(on_location)))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND & NOT_EDITED, throttled(on_text))
+    )
     app.add_handler(
         CallbackQueryHandler(
             throttled(on_card_callback), pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|"

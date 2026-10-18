@@ -236,6 +236,13 @@ RETRY_STATUSES = {429, 500, 502, 503, 504}
 RETRY_DELAYS = (1.0, 2.5)
 
 
+def _safe_reason(exc: httpx.HTTPError) -> str:
+    """Describe a transport failure without the request URL (it embeds the user's coordinates)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return type(exc).__name__
+
+
 async def fetch_forecast(
     client: httpx.AsyncClient, latitude: float, longitude: float, units: Units = "metric"
 ) -> Forecast:
@@ -256,13 +263,13 @@ async def fetch_forecast(
             if attempt < len(RETRY_DELAYS):
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue
-            raise WeatherError(f"Open-Meteo request failed: {exc}") from exc
+            raise WeatherError(f"Open-Meteo request failed: {_safe_reason(exc)}") from exc
         except httpx.HTTPError as exc:
-            raise WeatherError(f"Open-Meteo request failed: {exc}") from exc
+            raise WeatherError(f"Open-Meteo request failed: {_safe_reason(exc)}") from exc
         except ValueError as exc:
             raise WeatherError("Open-Meteo returned invalid JSON") from exc
     else:  # pragma: no cover - loop always breaks or raises
-        raise WeatherError(f"Open-Meteo request failed: {last_error}")
+        raise WeatherError(f"Open-Meteo request failed: {type(last_error).__name__}")
 
     if "error" in payload and payload.get("error"):
         raise WeatherError(payload.get("reason", "Open-Meteo returned an error"))
