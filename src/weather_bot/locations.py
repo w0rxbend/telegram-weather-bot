@@ -60,7 +60,8 @@ def _migrate(user_data: UserData) -> None:
 
 def _raw(user_data: UserData) -> list[dict[str, Any]]:
     _migrate(user_data)
-    return user_data.setdefault(KEY_LOCATIONS, [])
+    raw: list[dict[str, Any]] = user_data.setdefault(KEY_LOCATIONS, [])
+    return raw
 
 
 def _to_saved(index: int, raw: dict[str, Any], default_index: int) -> SavedLocation:

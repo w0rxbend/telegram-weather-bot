@@ -18,11 +18,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import httpx  # noqa: E402
+import httpx
 
-from weather_bot.render import render_card  # noqa: E402
-from weather_bot.render.sun_card import render_sun_card  # noqa: E402
-from weather_bot.weather import fetch_forecast, parse_forecast  # noqa: E402
+from weather_bot.render import render_card
+from weather_bot.render.sun_card import render_sun_card
+from weather_bot.weather import fetch_forecast, parse_forecast
 
 
 async def main() -> None:

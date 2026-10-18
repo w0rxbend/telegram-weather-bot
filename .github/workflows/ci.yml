@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,6 +24,15 @@ jobs:
         run: |
           poetry run ruff check src tests scripts
           poetry run ruff format --check src tests scripts
+      - name: Type check
+        run: poetry run mypy
+      - name: Security lint
+        run: poetry run bandit -q -c pyproject.toml -r src
+      - name: Dependency audit
+        run: |
+          pipx inject poetry poetry-plugin-export
+          poetry export -f requirements.txt --without-hashes -o requirements.txt
+          poetry run pip-audit -r requirements.txt --no-deps --disable-pip
       - name: Test
         run: poetry run pytest -q
       - name: Render a sample card

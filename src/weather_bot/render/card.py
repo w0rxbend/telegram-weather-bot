@@ -7,6 +7,7 @@ downsampled with Lanczos so every edge and glyph is antialiased.
 from __future__ import annotations
 
 import io
+import itertools
 from datetime import datetime
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -31,7 +32,7 @@ INNER = WIDTH - 2 * PAD
 
 
 def _alpha(rgb: RGB, a: float) -> tuple[int, int, int, int]:
-    return (*rgb, int(round(255 * a)))
+    return (*rgb, round(255 * a))
 
 
 class Canvas:
@@ -44,7 +45,7 @@ class Canvas:
     # -- geometry -----------------------------------------------------------------------
 
     def px(self, v: float) -> int:
-        return int(round(v * self.scale))
+        return round(v * self.scale)
 
     def box(self, x0: float, y0: float, x1: float, y1: float) -> list[int]:
         return [self.px(x0), self.px(y0), self.px(x1), self.px(y1)]
@@ -139,7 +140,7 @@ class Canvas:
     # -- images -------------------------------------------------------------------------
 
     def icon(self, kind: str, is_day: bool, size: int, x: float, y: float) -> None:
-        im = icons.icon(kind, is_day, self.px(size))  # type: ignore[arg-type]
+        im = icons.icon(kind, is_day, self.px(size))
         self.composite(im, x, y)
 
     def finish(self) -> Image.Image:
@@ -352,7 +353,7 @@ def _hourly(c: Canvas, fc: Forecast) -> None:
     line_layer = c.layer()
     ld = ImageDraw.Draw(line_layer)
     lw = 4.5
-    for (xa, ya), (xb, yb) in zip(curve, curve[1:], strict=False):
+    for (xa, ya), (xb, yb) in itertools.pairwise(curve):
         t = lo + (chart_bottom - (ya + yb) / 2) / (chart_bottom - chart_top) * (hi - lo)
         colour = _alpha(temp_colour(t, imperial), 1.0)
         ld.line([(c.px(xa), c.px(ya)), (c.px(xb), c.px(yb))], fill=colour, width=c.px(lw))

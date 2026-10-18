@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 
 from weather_bot.weather import IconKind
@@ -74,7 +75,7 @@ def temp_colour(value: float, imperial: bool = False) -> RGB:
         return stops[0][1]
     if celsius >= stops[-1][0]:
         return stops[-1][1]
-    for (t0, c0), (t1, c1) in zip(stops, stops[1:], strict=False):
+    for (t0, c0), (t1, c1) in itertools.pairwise(stops):
         if t0 <= celsius <= t1:
             k = (celsius - t0) / (t1 - t0)
             return tuple(round(a + (b - a) * k) for a, b in zip(c0, c1, strict=True))  # type: ignore[return-value]

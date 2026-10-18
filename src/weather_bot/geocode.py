@@ -45,7 +45,12 @@ async def reverse_geocode(
     fallback = Place(
         name=f"{latitude:.3f}, {longitude:.3f}", latitude=latitude, longitude=longitude
     )
-    params = {"lat": f"{latitude:.6f}", "lon": f"{longitude:.6f}", "format": "jsonv2", "zoom": 12}
+    params: dict[str, str | int] = {
+        "lat": f"{latitude:.6f}",
+        "lon": f"{longitude:.6f}",
+        "format": "jsonv2",
+        "zoom": 12,
+    }
     headers = {"Accept-Language": language or "en"}
     try:
         response = await client.get(NOMINATIM_REVERSE_URL, params=params, headers=headers)
@@ -69,7 +74,7 @@ async def search_place(
     client: httpx.AsyncClient, query: str, language: str | None = None
 ) -> Place | None:
     """Find the best match for a typed city name, or ``None`` when nothing matches."""
-    params = {
+    params: dict[str, str | int] = {
         "name": query.strip(),
         "count": 1,
         "language": (language or "en")[:2],

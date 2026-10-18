@@ -24,7 +24,7 @@ def quarantine_corrupt_state(path: Path) -> None:
         return
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)
+            pickle.load(fh)  # noqa: S301 - the bot's own state file, never user input
     except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
@@ -48,11 +48,11 @@ def start() -> None:
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list = []
 
-    async def post_init(app) -> None:  # noqa: ANN001
+    async def post_init(app) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:  # noqa: ANN001, ARG001
+    async def post_stop(app) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

@@ -18,6 +18,7 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -114,7 +115,7 @@ HELP = (
 # --- helpers -----------------------------------------------------------------------------
 
 
-def _client(context: Context) -> httpx.AsyncClient:  # noqa: ARG001 - kept for call sites
+def _client(context: Context) -> httpx.AsyncClient:
     return runtime.http()
 
 
@@ -744,10 +745,8 @@ def make_post_init(
 
 
 async def post_shutdown(app: Application) -> None:
-    try:
+    with contextlib.suppress(RuntimeError):
         await runtime.http().aclose()
-    except RuntimeError:
-        pass
     runtime.set_http(None)
 
 
