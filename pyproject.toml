@@ -48,7 +48,7 @@ select = ["E", "F", "I", "B", "UP", "S", "BLE", "ASYNC", "SIM", "RUF", "C4", "PT
 ignore = ["RUF001", "RUF002", "RUF003", "PT018", "PT011"]  # typographic symbols are intentional
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106"]
+"tests/**" = ["S101", "S105", "S106", "ASYNC240"]
 "scripts/**" = ["S101"]
 "src/weather_bot/bot.py" = ["S101"]  # TODO(F-04, F-15): removed by later fixes
 
