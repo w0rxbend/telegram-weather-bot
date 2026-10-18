@@ -60,6 +60,7 @@ from weather_bot.weather import Forecast, Units, WeatherError
 log = logging.getLogger(__name__)
 
 Context = ContextTypes.DEFAULT_TYPE
+HandlerCallback = Callable[[Update, Context], Awaitable[None]]
 
 KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
@@ -510,6 +511,13 @@ async def cmd_schedule(update: Update, context: Context) -> None:
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
+async def cmd_schedule_private_only(update: Update, context: Context) -> None:
+    message = update.effective_message
+    if message is None:
+        return
+    await message.reply_text("Automatic cards can only be set up in a private chat with me.")
+
+
 async def on_schedule_callback(update: Update, context: Context) -> None:
     query = update.callback_query
     assert query is not None
@@ -760,19 +768,33 @@ async def post_shutdown(app: Application) -> None:
 
 
 def register_handlers(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler(["add", "setup"], cmd_add))
-    app.add_handler(CommandHandler(["weather", "now", "w"], cmd_weather))
-    app.add_handler(CommandHandler(["sun", "sunset", "sunrise"], cmd_sun))
-    app.add_handler(CommandHandler(["locations", "list"], cmd_locations))
-    app.add_handler(CommandHandler("default", cmd_default))
-    app.add_handler(CommandHandler(["remove", "delete"], cmd_remove))
-    app.add_handler(CommandHandler("rename", cmd_rename))
-    app.add_handler(CommandHandler("schedule", cmd_schedule))
-    app.add_handler(CommandHandler("units", cmd_units))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(MessageHandler(filters.LOCATION, on_location))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    # Only brand-new messages: edited messages (live-location updates arrive every few
+    # seconds as edits) and channel posts must never trigger cards.
+    new_message = filters.UpdateType.MESSAGE
+    private = filters.ChatType.PRIVATE
+
+    def command(names: str | list[str], callback: HandlerCallback, *extra: Any) -> None:
+        flt = new_message
+        for item in extra:
+            flt = flt & item
+        app.add_handler(CommandHandler(names, callback, filters=flt))
+
+    command("start", cmd_start)
+    command(["add", "setup"], cmd_add)
+    command(["weather", "now", "w"], cmd_weather)
+    command(["sun", "sunset", "sunrise"], cmd_sun)
+    command(["locations", "list"], cmd_locations)
+    command("default", cmd_default)
+    command(["remove", "delete"], cmd_remove)
+    command("rename", cmd_rename)
+    command("schedule", cmd_schedule, private)
+    command("schedule", cmd_schedule_private_only, ~private)
+    command("units", cmd_units)
+    command("help", cmd_help)
+    app.add_handler(MessageHandler(new_message & filters.LOCATION, on_location))
+    app.add_handler(
+        MessageHandler(new_message & private & filters.TEXT & ~filters.COMMAND, on_text)
+    )
     app.add_handler(
         CallbackQueryHandler(on_card_callback, pattern=rf"^({CB_REFRESH}|{CB_UNITS}|{CB_SUN})\|")
     )
