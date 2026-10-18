@@ -50,7 +50,7 @@ ignore = ["RUF001", "RUF002", "RUF003", "PT018", "PT011"]  # typographic symbols
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]
 "scripts/**" = ["S101"]
-"src/weather_bot/bot.py" = ["S101", "S110", "SIM105"]  # TODO(F-04, F-15): removed by later fixes
+"src/weather_bot/bot.py" = ["S101"]  # TODO(F-04, F-15): removed by later fixes
 
 [tool.mypy]
 python_version = "3.11"

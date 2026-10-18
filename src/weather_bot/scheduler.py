@@ -92,7 +92,7 @@ async def _send(app, user_id: int, data) -> None:
         log.info("User %s blocked the bot; schedule removed", user_id)
         sched.clear_schedule(data)
     except TelegramError as exc:
-        log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
+        log.warning("Scheduled send for user %s failed: %s", user_id, exc)
 
 
 def start(app, interval: float = INTERVAL) -> asyncio.Task:

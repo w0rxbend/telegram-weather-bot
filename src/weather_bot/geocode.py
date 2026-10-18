@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from weather_bot.privacy import describe_error
+
 log = logging.getLogger(__name__)
 
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -57,7 +59,7 @@ async def reverse_geocode(
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        log.warning("Reverse geocoding failed: %s", exc)
+        log.warning("Reverse geocoding failed: %s", describe_error(exc))
         return fallback
 
     address = data.get("address") or {}
@@ -85,7 +87,7 @@ async def search_place(
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        log.warning("Forward geocoding failed: %s", exc)
+        log.warning("Forward geocoding failed: %s", describe_error(exc))
         return None
 
     results = data.get("results") or []

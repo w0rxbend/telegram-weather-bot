@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 import httpx
 
+from weather_bot.privacy import describe_error
+
 Units = Literal["metric", "imperial"]
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -256,9 +258,13 @@ async def fetch_forecast(
             if attempt < len(RETRY_DELAYS):
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue
-            raise WeatherError(f"Open-Meteo request failed: {exc}") from exc
+            raise WeatherError(
+                f"Open-Meteo request failed: {describe_error(exc)}"
+            ) from None  # the cause embeds the request URL (PII)
         except httpx.HTTPError as exc:
-            raise WeatherError(f"Open-Meteo request failed: {exc}") from exc
+            raise WeatherError(
+                f"Open-Meteo request failed: {describe_error(exc)}"
+            ) from None  # the cause embeds the request URL (PII)
         except ValueError as exc:
             raise WeatherError("Open-Meteo returned invalid JSON") from exc
     else:  # pragma: no cover - loop always breaks or raises
