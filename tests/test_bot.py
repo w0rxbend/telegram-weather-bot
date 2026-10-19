@@ -69,6 +69,8 @@ def test_keyboard_and_callback_parsing() -> None:
     assert kb.inline_keyboard[1][1].callback_data == "l|0"
     assert bot._parse_callback(refresh.callback_data) == ("r", 50.45, 30.52)
     assert bot._parse_callback("garbage") is None
+    for bad in ("r|nan|30", "r|50|inf", "r|91|30", "r|50|-180.5", "r|1e999|0"):
+        assert bot._parse_callback(bad) is None
     assert bot._parse_slot_callback("d|2") == ("d", 2)
     assert bot._parse_slot_callback(None) is None
 

@@ -65,6 +65,8 @@ KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
+MAX_LATITUDE = 90.0
+MAX_LONGITUDE = 180.0
 
 CB_REFRESH = "r"
 CB_UNITS = "u"
@@ -114,7 +116,7 @@ HELP = (
 # --- helpers -----------------------------------------------------------------------------
 
 
-def _client(context: Context) -> httpx.AsyncClient:  # noqa: ARG001 - kept for call sites
+def _client(context: Context) -> httpx.AsyncClient:
     return runtime.http()
 
 
@@ -616,11 +618,17 @@ async def on_text(update: Update, context: Context) -> None:
 
 
 def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
+    """Parse ``action|lat|lon``; callback_data is client-controlled, so range-check it."""
     try:
         action, lat, lon = (data or "").split("|")
-        return action, float(lat), float(lon)
+        latitude, longitude = float(lat), float(lon)
     except ValueError:
         return None
+    if not (
+        -MAX_LATITUDE <= latitude <= MAX_LATITUDE and -MAX_LONGITUDE <= longitude <= MAX_LONGITUDE
+    ):
+        return None  # also rejects nan, which fails every comparison
+    return action, latitude, longitude
 
 
 def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
@@ -725,7 +733,7 @@ async def on_error(update: object, context: Context) -> None:
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text("Something went wrong. Please try again.")
-        except Exception:  # noqa: BLE001 - best effort only
+        except Exception:
             pass
 
 
