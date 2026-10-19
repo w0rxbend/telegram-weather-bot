@@ -1,5 +1,5 @@
 # ---- builder: turn poetry.lock into a pinned requirements.txt ------------------------------
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -13,7 +13,7 @@ RUN poetry export -f requirements.txt --without-hashes -o requirements.txt
 
 
 # ---- runtime -------------------------------------------------------------------------------
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Unbuffered logs, no .pyc clutter, state in a mountable volume.
 ENV PYTHONUNBUFFERED=1 \
