@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pickle
 import time
@@ -12,7 +13,7 @@ from telegram import Update
 from telegram.ext import AIORateLimiter, ApplicationBuilder
 
 from weather_bot import scheduler
-from weather_bot.bot import make_post_init, post_shutdown, register_handlers
+from weather_bot.bot import App, make_post_init, post_shutdown, register_handlers
 from weather_bot.cache import forecast_cache
 from weather_bot.config import load_settings
 from weather_bot.persistence import AtomicPicklePersistence
@@ -51,13 +52,13 @@ def start() -> None:
         )
 
     bot_post_init = make_post_init(http_factory)
-    scheduler_task: list = []
+    scheduler_task: list[asyncio.Task[None]] = []
 
-    async def post_init(app) -> None:
+    async def post_init(app: App) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:
+    async def post_stop(app: App) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (

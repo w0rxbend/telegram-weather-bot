@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from telegram.ext import PicklePersistence
 
 
-class AtomicPicklePersistence(PicklePersistence):
+class AtomicPicklePersistence(PicklePersistence[Any, Any, Any]):
     def _dump_singlefile(self) -> None:
         final = Path(self.filepath)
         temp = final.with_name(f"{final.name}.tmp")

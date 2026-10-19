@@ -14,6 +14,7 @@ import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from telegram import InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -23,12 +24,15 @@ from weather_bot import locations as store
 from weather_bot import schedule as sched
 from weather_bot.weather import WeatherError
 
+if TYPE_CHECKING:
+    from weather_bot.bot import App
+
 log = logging.getLogger(__name__)
 
 INTERVAL = 30.0
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:
+async def scheduler_loop(app: App, interval: float = INTERVAL) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
@@ -40,7 +44,7 @@ async def scheduler_loop(app, interval: float = INTERVAL) -> None:
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:
+async def tick(app: App, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -63,7 +67,7 @@ async def tick(app, now: datetime | None = None) -> int:
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:
+async def _send(app: App, user_id: int, data: dict[Any, Any]) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -102,7 +106,7 @@ def _seconds(value: int | timedelta) -> float:
 
 
 async def _send_photo_with_retry(
-    app,
+    app: App,
     *,
     chat_id: int,
     photo: bytes,
@@ -122,19 +126,18 @@ async def _send_photo_with_retry(
         except RetryAfter as exc:
             if attempt:
                 raise
-            log.warning(
-                "Flood control: waiting %ss before retrying chat %s", exc.retry_after, chat_id
-            )
-            await asyncio.sleep(exc.retry_after)
+            delay = _seconds(exc.retry_after)
+            log.warning("Flood control: waiting %ss before retrying chat %s", delay, chat_id)
+            await asyncio.sleep(delay)
         else:
             return
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:
+def start(app: App, interval: float = INTERVAL) -> asyncio.Task[None]:
     return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
 
 
-async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:
+async def stop(task: asyncio.Task[None] | None, on_done: Callable[[], None] | None = None) -> None:
     if task is None:
         return
     task.cancel()
