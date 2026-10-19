@@ -6,7 +6,12 @@ the dump fail, which truncates the single state file and breaks the next startup
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
+from telegram.ext import Application
+
+App = Application[Any, Any, Any, Any, Any, Any]  # PTB application with default context types
 
 _http: httpx.AsyncClient | None = None
 

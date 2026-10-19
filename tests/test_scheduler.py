@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from telegram.error import Forbidden
+from telegram.error import BadRequest, Forbidden, RetryAfter
 
 from weather_bot import locations as store
 from weather_bot import schedule as sched
@@ -83,3 +83,44 @@ async def test_one_failing_user_does_not_block_others(forecast: Forecast) -> Non
     with patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))):
         assert await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC)) == 1
     assert app.bot.send_photo.await_count == 2
+
+
+def _scheduled_app(chat_id: int = 1) -> tuple[SimpleNamespace, dict]:
+    data: dict = {}
+    store.add_location(data, KYIV)
+    sched.set_schedule(data, times=["07:30"], preset="morning", tz="Europe/Kyiv", chat_id=chat_id)
+    return make_app({1: data}), data
+
+
+async def test_flood_control_is_waited_out_once(forecast: Forecast) -> None:
+    app, _ = _scheduled_app()
+    app.bot.send_photo = AsyncMock(side_effect=[RetryAfter(2), None])
+    sleep = AsyncMock()
+    with (
+        patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))),
+        patch("weather_bot.scheduler.asyncio.sleep", sleep),
+    ):
+        await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC))
+    assert app.bot.send_photo.await_count == 2
+    sleep.assert_awaited_once_with(2.0)
+
+
+async def test_long_flood_control_wait_is_not_slept(forecast: Forecast) -> None:
+    app, _ = _scheduled_app()
+    app.bot.send_photo = AsyncMock(side_effect=RetryAfter(3600))
+    sleep = AsyncMock()
+    with (
+        patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))),
+        patch("weather_bot.scheduler.asyncio.sleep", sleep),
+    ):
+        await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC))
+    sleep.assert_not_awaited()
+    assert app.bot.send_photo.await_count == 1
+
+
+async def test_vanished_chat_removes_schedule(forecast: Forecast) -> None:
+    app, data = _scheduled_app()
+    app.bot.send_photo = AsyncMock(side_effect=BadRequest("Chat not found"))
+    with patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))):
+        await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC))
+    assert sched.get_schedule(data) is None

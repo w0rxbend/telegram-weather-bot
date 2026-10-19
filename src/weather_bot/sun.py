@@ -81,7 +81,7 @@ def sun_info(fc: Forecast, now: datetime | None = None) -> SunInfo:
 
 
 def fmt_duration(delta: timedelta) -> str:
-    total = int(round(delta.total_seconds() / 60))
+    total = round(delta.total_seconds() / 60)
     hours, minutes = divmod(abs(total), 60)
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
 
@@ -89,7 +89,7 @@ def fmt_duration(delta: timedelta) -> str:
 def fmt_change(delta: timedelta | None) -> str:
     if delta is None:
         return ""
-    total = int(round(delta.total_seconds() / 60))
+    total = round(delta.total_seconds() / 60)
     if total == 0:
         return "same as yesterday"
     sign = "+" if total > 0 else "−"

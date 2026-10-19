@@ -36,4 +36,8 @@ COPY src/ ./src
 USER userapp
 VOLUME ["/data"]
 
+# Healthy while the scheduler loop keeps touching DATA_DIR/heartbeat (see weather_bot.health).
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "-m", "weather_bot.health"]
+
 CMD ["python", "-m", "weather_bot"]

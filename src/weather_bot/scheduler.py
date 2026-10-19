@@ -10,35 +10,49 @@ outside of an update handler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 
+from weather_bot import health
 from weather_bot import locations as store
 from weather_bot import schedule as sched
+from weather_bot.locations import UserData
+from weather_bot.runtime import App
 from weather_bot.weather import WeatherError
 
 log = logging.getLogger(__name__)
 
 INTERVAL = 30.0
+MAX_RETRY_AFTER = 60.0  # longest flood-control wait we will sit out inside a tick
+CHAT_GONE = "chat not found"
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN001 - PTB Application
+async def scheduler_loop(
+    app: App,
+    interval: float = INTERVAL,
+    heartbeat: Path | None = None,
+) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
             await tick(app)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - keep the loop alive whatever happens
+        except Exception:
             log.exception("Scheduler tick failed")
+        if heartbeat is not None:
+            health.beat(heartbeat)
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
+async def tick(app: App, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -53,7 +67,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
         try:
             await _send(app, user_id, data)
             sent += 1
-        except Exception:  # noqa: BLE001 - one user's failure must not skip the others
+        except Exception:
             log.exception("Scheduled send for user %s failed", user_id)
     if touched:
         app.mark_data_for_update_persistence(user_ids=touched)
@@ -61,7 +75,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
+async def _send(app: App, user_id: int, data: UserData) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -80,7 +94,8 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         return
     sched.update_timezone(data, forecast.timezone)
     try:
-        await app.bot.send_photo(
+        await _send_photo(
+            app,
             chat_id=schedule.chat_id,
             photo=png,
             caption=_caption(place, forecast, "weather"),
@@ -90,21 +105,41 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
     except Forbidden:
         log.info("User %s blocked the bot; schedule removed", user_id)
         sched.clear_schedule(data)
+    except BadRequest as exc:
+        if CHAT_GONE not in str(exc).lower():
+            log.warning("Scheduled send for user %s failed: %s", user_id, exc)
+            return
+        log.info("Chat of user %s no longer exists; schedule removed", user_id)
+        sched.clear_schedule(data)
     except TelegramError as exc:
-        log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
+        log.warning("Scheduled send for user %s failed: %s", user_id, exc)
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:  # noqa: ANN001
-    return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
+async def _send_photo(app: App, **kwargs: Any) -> None:
+    """send_photo, sitting out one Telegram flood-control (429) wait before giving up."""
+    try:
+        await app.bot.send_photo(**kwargs)
+    except RetryAfter as exc:
+        delay = exc.retry_after
+        seconds = delay.total_seconds() if isinstance(delay, timedelta) else float(delay)
+        if seconds > MAX_RETRY_AFTER:
+            raise
+        log.warning("Flood control: waiting %.0fs before retrying", seconds)
+        await asyncio.sleep(seconds)
+        await app.bot.send_photo(**kwargs)
 
 
-async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = None) -> None:
+def start(
+    app: App, interval: float = INTERVAL, heartbeat: Path | None = None
+) -> asyncio.Task[None]:
+    return asyncio.create_task(scheduler_loop(app, interval, heartbeat), name="weather-scheduler")
+
+
+async def stop(task: asyncio.Task[None] | None, on_done: Callable[[], None] | None = None) -> None:
     if task is None:
         return
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     if on_done:
         on_done()

@@ -10,6 +10,7 @@ Slots are shown to people 1-based (``/weather 2``); internally they are 0-based 
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,7 @@ KEY_DEFAULT = "default_location"
 LEGACY_KEY = "location"  # single-location format from the first release
 
 MAX_LOCATIONS = 10
+MAX_ALIAS_LENGTH = 30
 SAME_SPOT_DEGREES = 0.005  # ~500 m; closer than that counts as the same place
 
 UserData = MutableMapping[str, Any]
@@ -49,6 +51,15 @@ class SavedLocation:
         return self.place.name
 
 
+def clean_alias(text: str | None) -> str | None:
+    """Normalise a user-chosen slot name: NFKC, no control characters, single spaces, capped."""
+    normalised = unicodedata.normalize("NFKC", text or "")
+    printable = "".join(
+        " " if ch.isspace() else ch for ch in normalised if ch.isprintable() or ch.isspace()
+    )
+    return " ".join(printable.split())[:MAX_ALIAS_LENGTH].strip() or None
+
+
 def _migrate(user_data: UserData) -> None:
     legacy = user_data.pop(LEGACY_KEY, None)
     if legacy and KEY_LOCATIONS not in user_data:
@@ -60,7 +71,8 @@ def _migrate(user_data: UserData) -> None:
 
 def _raw(user_data: UserData) -> list[dict[str, Any]]:
     _migrate(user_data)
-    return user_data.setdefault(KEY_LOCATIONS, [])
+    raw: list[dict[str, Any]] = user_data.setdefault(KEY_LOCATIONS, [])
+    return raw
 
 
 def _to_saved(index: int, raw: dict[str, Any], default_index: int) -> SavedLocation:
@@ -94,7 +106,7 @@ def add_location(
 ) -> tuple[SavedLocation, bool]:
     """Add a place; returns (location, created). Re-sharing a known spot updates its alias."""
     raw = _raw(user_data)
-    alias = (alias or "").strip() or None
+    alias = clean_alias(alias)
     for i, item in enumerate(raw):
         if (
             abs(item["lat"] - place.latitude) < SAME_SPOT_DEGREES
@@ -137,7 +149,7 @@ def rename_location(user_data: UserData, index: int, alias: str) -> SavedLocatio
     raw = _raw(user_data)
     if not 0 <= index < len(raw):
         return None
-    raw[index]["alias"] = alias.strip() or None
+    raw[index]["alias"] = clean_alias(alias)
     return list_locations(user_data)[index]
 
 
@@ -147,7 +159,7 @@ def resolve(user_data: UserData, query: str | None) -> SavedLocation | None:
     if not query:
         return get_default(user_data)
     locations = list_locations(user_data)
-    if query.isdigit():
+    if query.isascii() and query.isdigit():
         slot = int(query)
         return locations[slot - 1] if 1 <= slot <= len(locations) else None
     q = query.lower()

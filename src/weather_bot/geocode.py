@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from weather_bot.privacy import describe_error
+
 log = logging.getLogger(__name__)
 
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -45,14 +47,19 @@ async def reverse_geocode(
     fallback = Place(
         name=f"{latitude:.3f}, {longitude:.3f}", latitude=latitude, longitude=longitude
     )
-    params = {"lat": f"{latitude:.6f}", "lon": f"{longitude:.6f}", "format": "jsonv2", "zoom": 12}
+    params: dict[str, str | int] = {
+        "lat": f"{latitude:.6f}",
+        "lon": f"{longitude:.6f}",
+        "format": "jsonv2",
+        "zoom": 12,
+    }
     headers = {"Accept-Language": language or "en"}
     try:
         response = await client.get(NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        log.warning("Reverse geocoding failed: %s", exc)
+        log.warning("Reverse geocoding failed: %s", describe_error(exc))
         return fallback
 
     address = data.get("address") or {}
@@ -69,7 +76,7 @@ async def search_place(
     client: httpx.AsyncClient, query: str, language: str | None = None
 ) -> Place | None:
     """Find the best match for a typed city name, or ``None`` when nothing matches."""
-    params = {
+    params: dict[str, str | int] = {
         "name": query.strip(),
         "count": 1,
         "language": (language or "en")[:2],
@@ -80,7 +87,7 @@ async def search_place(
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        log.warning("Forward geocoding failed: %s", exc)
+        log.warning("Forward geocoding failed: %s", describe_error(exc))
         return None
 
     results = data.get("results") or []

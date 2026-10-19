@@ -29,6 +29,10 @@ include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }
 pytest = ">=8.0"
 pytest-asyncio = ">=0.24"
 ruff = ">=0.6"
+mypy = ">=1.11"
+bandit = ">=1.7"
+pip-audit = ">=2.7"
+pre-commit = ">=3.8"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -40,4 +44,18 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "S", "BLE", "ASYNC", "SIM", "RUF", "C4", "PT"]
+ignore = ["RUF001", "RUF002", "RUF003", "PT018", "PT011"]  # typographic symbols are intentional
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "ASYNC240"]
+"scripts/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]
