@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,10 +16,22 @@ class Settings:
     data_dir: Path
     http_timeout: float
     user_agent: str
+    forecast_cache_ttl: float
 
     @property
     def persistence_file(self) -> Path:
         return self.data_dir / "bot_state.pickle"
+
+
+def _positive_float(name: str, default: str) -> float:
+    raw = os.getenv(name, default)
+    try:
+        value = float(raw)
+    except ValueError:
+        raise RuntimeError(f"{name} must be a number, got {raw!r}.") from None
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be a positive number, got {raw!r}.")
+    return value
 
 
 def load_settings() -> Settings:
@@ -33,9 +46,10 @@ def load_settings() -> Settings:
     return Settings(
         bot_token=token,
         data_dir=data_dir,
-        http_timeout=float(os.getenv("HTTP_TIMEOUT", "15")),
+        http_timeout=_positive_float("HTTP_TIMEOUT", "15"),
         user_agent=os.getenv(
             "USER_AGENT",
             "telegram-weather-bot/1.0 (+https://github.com/w0rxbend/telegram-weather-bot)",
         ),
+        forecast_cache_ttl=_positive_float("FORECAST_CACHE_TTL", "3600"),
     )

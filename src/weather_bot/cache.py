@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TTL = float(os.getenv("FORECAST_CACHE_TTL", "3600"))
+DEFAULT_TTL = 3600.0  # overridden at startup from Settings.forecast_cache_ttl
 STALE_TTL = 6 * 3600
 MAX_ENTRIES = 5000
 KEY_PRECISION = 2  # decimals of latitude/longitude

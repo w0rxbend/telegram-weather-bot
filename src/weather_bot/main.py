@@ -8,11 +8,14 @@ import time
 from pathlib import Path
 
 import httpx
-from telegram.ext import ApplicationBuilder, PicklePersistence
+from telegram import Update
+from telegram.ext import AIORateLimiter, ApplicationBuilder
 
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
+from weather_bot.cache import forecast_cache
 from weather_bot.config import load_settings
+from weather_bot.persistence import AtomicPicklePersistence
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 log = logging.getLogger(__name__)
@@ -24,7 +27,8 @@ def quarantine_corrupt_state(path: Path) -> None:
         return
     try:
         with path.open("rb") as fh:
-            pickle.load(fh)
+            # Trusted input: our own file in DATA_DIR, which PTB unpickles the same way anyway.
+            pickle.load(fh)  # noqa: S301  # nosec B301
     except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
         backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
         path.rename(backup)
@@ -37,6 +41,7 @@ def start() -> None:
 
     settings = load_settings()
     quarantine_corrupt_state(settings.persistence_file)
+    forecast_cache().ttl = settings.forecast_cache_ttl
 
     def http_factory() -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -48,17 +53,18 @@ def start() -> None:
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list = []
 
-    async def post_init(app) -> None:  # noqa: ANN001
+    async def post_init(app) -> None:
         await bot_post_init(app)
         scheduler_task.append(scheduler.start(app))
 
-    async def post_stop(app) -> None:  # noqa: ANN001, ARG001
+    async def post_stop(app) -> None:
         await scheduler.stop(scheduler_task.pop() if scheduler_task else None)
 
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
-        .persistence(PicklePersistence(filepath=settings.persistence_file))
+        .persistence(AtomicPicklePersistence(filepath=settings.persistence_file))
+        .rate_limiter(AIORateLimiter(max_retries=3))
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)
@@ -67,7 +73,11 @@ def start() -> None:
     )
     register_handlers(application)
     log.info("Starting polling; state stored in %s", settings.persistence_file)
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling(
+        drop_pending_updates=True,
+        # No edited messages (live-location edits would re-render cards), no channel posts.
+        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY],
+    )
 
 
 if __name__ == "__main__":
