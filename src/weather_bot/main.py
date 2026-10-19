@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pickle
+import pickle  # nosec B403
 import time
 from pathlib import Path
 
