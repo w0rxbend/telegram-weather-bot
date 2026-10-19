@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
 import weakref
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
@@ -257,12 +258,17 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+RENDER_CONCURRENCY = os.cpu_count() or 2
+_render_slots = asyncio.Semaphore(RENDER_CONCURRENCY)
+
+
 async def _build_card(
     place: Place, units: Units, kind: CardKind = "weather"
 ) -> tuple[bytes, Forecast]:
     forecast = await cached_forecast(runtime.http(), place.latitude, place.longitude, units)
     render = render_sun_card if kind == "sun" else render_card
-    png = await asyncio.to_thread(render, forecast, place.name)
+    async with _render_slots:  # Pillow work is CPU-bound: cap it so bursts cannot starve I/O
+        png = await asyncio.to_thread(render, forecast, place.name)
     return png, forecast
 
 

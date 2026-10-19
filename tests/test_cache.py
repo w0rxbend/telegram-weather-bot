@@ -83,3 +83,28 @@ def test_eviction(forecast: Forecast) -> None:
     assert len(cache) == 2
     assert cache.peek(0.0, 0.0, "metric") is None
     assert cache.peek(2.0, 0.0, "metric") is forecast
+
+
+async def test_waiters_are_released_when_the_fetch_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    async def slow_fetch(*_args: object) -> Forecast:
+        started.set()
+        await asyncio.sleep(3600)
+        raise AssertionError("never reached")
+
+    monkeypatch.setattr(cache_mod, "fetch_forecast", slow_fetch)
+    cache = ForecastCache()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))) as c:
+        first = asyncio.create_task(cache.get(c, 50.45, 30.52))
+        await started.wait()
+        waiter = asyncio.create_task(cache.get(c, 50.45, 30.52))
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(WeatherError, match="aborted"):
+            await asyncio.wait_for(waiter, timeout=2)
+        with pytest.raises(asyncio.CancelledError):
+            await first
+    assert cache.peek(50.45, 30.52, "metric") is None

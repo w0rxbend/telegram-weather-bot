@@ -7,16 +7,27 @@ Reviewed on 2026-10-18 against the code as of the forecast-cache commit. Each it
 - **P2** – worthwhile within the next few iterations.
 - **P3** – nice to have.
 
-Already handled in this round (kept here for context): HTTP client is no longer stored in
-persisted `bot_data` (it broke pickling and crashed startup); a corrupt state file is moved
-aside instead of crash-looping; forecasts are cached per place/units/hour with request
-coalescing and a stale fallback; one user's failed scheduled send no longer aborts the tick.
+Already handled (kept here for context): HTTP client is no longer stored in persisted
+`bot_data` (it broke pickling and crashed startup); a corrupt state file is moved aside instead of
+crash-looping; forecasts are cached per place/units/hour with request coalescing and a stale
+fallback; one user's failed scheduled send no longer aborts the tick.
+
+Handled by PR #41 (merged 2026-10-19, details in `REVIEW.md`): atomic 0600 state-file writes
+(`persistence.py`), `RetryAfter` retry in the scheduler, per-user locking and a 10 cards/minute
+rate limit, callback/slot input validation, edited-message and channel-post filtering, PII-free
+logging (`privacy.py`), validated config, lock refresh for known CVEs, `TG_BOT_TOKEN` passed to
+the deploy via `envs:`, `permissions: contents: read`, Dependabot, container healthcheck
+(`health.py`) with `read_only` / `cap_drop` / `no-new-privileges`, mypy `--strict`, bandit and
+pip-audit in CI, `CODING_STANDARDS.md`. Ported from PR #42: cache waiters released when a fetch is
+cancelled; render concurrency capped at the CPU count.
+
+Items below that are now done are marked **[done]** in their heading; the rest stay open.
 
 ---
 
 ## Robustness
 
-### P1 · Atomic writes for the persistence file
+### P1 · Atomic writes for the persistence file **[done in #41; rolling backups still open]**
 **Why.** `PicklePersistence._dump_singlefile` opens the file with `"wb"` (truncating it) and
 then pickles. A crash, OOM kill or container stop between those two steps leaves an empty or
 partial file. The quarantine guard in `main.py` prevents a crash loop, but all user state is
@@ -44,7 +55,7 @@ entirely; the data model is already dict/JSON-friendly (`locations.py`, `schedul
 **Verify.** Round-trip tests per module; run the migration against a copy of the production
 file (`docker cp`).
 
-### P1 · Telegram flood control for scheduled sends
+### P1 · Telegram flood control for scheduled sends **[partly done in #41: RetryAfter retry; AIORateLimiter still open]**
 **Why.** At a popular slot (07:30) the scheduler sends one photo per user back-to-back.
 Telegram allows ~30 messages/second overall and 1 message/second per chat; over that it
 returns `RetryAfter`, which is currently just logged, so the user misses the card.
@@ -71,7 +82,7 @@ for the interactive path too: pressing 🔄 twice within a minute should not re-
 **Verify.** Test that `_build_card` is called once for N users sharing a place; measure
 `tick` duration with 100 users before/after.
 
-### P2 · Protect the event loop from render CPU
+### P2 · Protect the event loop from render CPU **[semaphore done; JPEG / lower scale still open]**
 **Why.** `render_card` runs in `asyncio.to_thread`, but Pillow holds the GIL for much of the
 work, so a burst of renders still makes handlers sluggish. There is no cap on concurrent
 renders.
@@ -85,7 +96,7 @@ the pool at startup). Lower the cost per render: `SCALE = 2` → consider 1.5× 
 **Verify.** `python -m timeit` on `render_card` before/after; eyeball `docs/preview-*.png` for
 regressions; keep the PNG path for the README previews.
 
-### P2 · Per-user and global rate limiting of interactive commands
+### P2 · Per-user and global rate limiting of interactive commands **[done in #41]**
 **Why.** Any user can spam `/weather` or the refresh button; each hit costs a render and an
 upload. Nothing stops a hostile user from pinning the CPU.
 
@@ -95,7 +106,7 @@ instead of rendering. Combine with the render semaphore above.
 
 **Verify.** Test: 11 rapid calls → 10 photos, 1 text reply.
 
-### P2 · Health check and self-monitoring
+### P2 · Health check and self-monitoring **[done in #41; metrics still open]**
 **Why.** A hung polling loop or a scheduler task that died silently looks identical to
 "no messages". Docker's `restart: unless-stopped` only restarts on process exit.
 
@@ -107,7 +118,7 @@ external uptime monitor. Log a WARNING if a scheduler tick takes longer than the
 **Verify.** `docker inspect --format '{{.State.Health.Status}}'`; kill the scheduler task in a
 test and assert the healthcheck turns unhealthy.
 
-### P2 · Sequential processing per user
+### P2 · Sequential processing per user **[done in #41]**
 **Why.** `concurrent_updates(True)` lets two updates from the same user run in parallel.
 Both mutate `user_data` (slot add/remove, schedule set), so a fast double-tap can interleave
 and, in the worst case, remove the wrong slot.
@@ -139,7 +150,7 @@ Sentry (`sentry-sdk`) for exception reports; redact `update` payloads (see secur
 
 ## Security
 
-### P1 · Pin GitHub Actions and stop interpolating secrets into shell scripts
+### P1 · Pin GitHub Actions and stop interpolating secrets into shell scripts **[secrets via envs done in #41; SHA pinning still open]**
 **Why.** `appleboy/telegram-action@master` and `appleboy/ssh-action@v1` / `scp-action@v1`
 track mutable refs; a compromised upstream commit runs with your Docker Hub and SSH
 secrets. The deploy step writes `export TG_BOT_TOKEN=${{ secrets.TG_BOT_TOKEN }}` into a
@@ -155,7 +166,7 @@ reads (`env_file`). Add `permissions: contents: read` at the top of both workflo
 **Verify.** `grep -n "@master\|@v1$" .github/workflows/*.yml` returns nothing; the deploy log
 shows no `export TG_BOT_TOKEN`.
 
-### P1 · Keep personal data out of logs
+### P1 · Keep personal data out of logs **[done in #41]**
 **Why.** `on_error` logs the whole `Update` (user id, name, message text, shared coordinates)
 at ERROR level; warnings in `bot.py` and `scheduler.py` include `Place(...)` with exact
 coordinates. Logs end up in `docker logs` and any log shipper.
@@ -177,7 +188,7 @@ text in a Docker volume, and pickle unpickles arbitrary objects.
 (`user_data.clear()`), which also serves as a GDPR-style erasure path; mention retention in
 the bot description.
 
-### P2 · Validate and bound user-controlled input everywhere
+### P2 · Validate and bound user-controlled input everywhere **[alias normalisation done in #41; places cache scoping still open]**
 **Why.** Most inputs are bounded already (city query 2–80 chars, alias ≤ 30, ≤ 24 schedule
 times, ≤ 10 slots). Two gaps: `/rename` and `/add` aliases are stored verbatim and rendered
 on the card with Pillow, where very long or RTL/combining strings could overflow the header
@@ -190,7 +201,7 @@ user, so the impact is a stale label, not injection.
 collapse whitespace). Scope the places cache by user (`user_data`) or drop it: saved slots
 already carry their names, and one-off cities can be re-geocoded on refresh.
 
-### P2 · Dependency and image hygiene
+### P2 · Dependency and image hygiene **[pip-audit, Dependabot, read_only container done in #41; Trivy still open]**
 **Why.** The image is rebuilt from `python:3.13-slim` on every push, but nothing re-pins or
 audits dependencies, and there is no SBOM or vulnerability scan since `.whitesource` was
 removed.
@@ -201,7 +212,7 @@ HIGH/CRITICAL; enable Dependabot for pip (weekly). Run the container with
 `read_only: true` and `tmpfs: /tmp` in `docker-compose.yaml` (only `/data` needs writes),
 and `cap_drop: [ALL]`.
 
-### P3 · Outbound request hardening
+### P3 · Outbound request hardening **[redirects off + connection cap done in #41; size guard still open]**
 **Why.** The bot calls three public APIs with a 15 s timeout, follows redirects, and has no
 response size limit. A misbehaving endpoint could hold connections or return a huge body.
 

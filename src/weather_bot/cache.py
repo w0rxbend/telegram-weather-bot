@@ -92,7 +92,11 @@ class ForecastCache:
                 log.warning("Serving stale forecast for %s after error: %s", key, exc)
                 future.set_result(entry.forecast)
                 return entry.forecast
-            future.set_exception(exc)
+            self._fail(future, exc)
+            raise
+        except BaseException as exc:
+            # Cancellation or a bug in the fetch: release the waiters, never leave them hanging.
+            self._fail(future, WeatherError(f"Forecast fetch aborted: {exc!r}"))
             raise
         else:
             self.put(key[0], key[1], units, forecast)
@@ -100,6 +104,13 @@ class ForecastCache:
             return forecast
         finally:
             self._pending.pop(key, None)
+
+    @staticmethod
+    def _fail(future: asyncio.Future[Forecast], exc: WeatherError) -> None:
+        if future.done():
+            return
+        future.set_exception(exc)
+        future.exception()  # mark as retrieved so asyncio does not warn when nobody waits
 
 
 _cache = ForecastCache()
