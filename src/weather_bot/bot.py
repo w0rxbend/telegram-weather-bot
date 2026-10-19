@@ -18,7 +18,9 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from html import escape
@@ -67,6 +69,9 @@ KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
 MAX_LATITUDE = 90.0
 MAX_LONGITUDE = 180.0
+
+RENDER_CONCURRENCY = os.cpu_count() or 2
+_render_slots = asyncio.Semaphore(RENDER_CONCURRENCY)
 
 CB_REFRESH = "r"
 CB_UNITS = "u"
@@ -220,7 +225,8 @@ async def _build_card(
 ) -> tuple[bytes, Forecast]:
     forecast = await cached_forecast(runtime.http(), place.latitude, place.longitude, units)
     render = render_sun_card if kind == "sun" else render_card
-    png = await asyncio.to_thread(render, forecast, place.name)
+    async with _render_slots:  # Pillow work is CPU-bound: cap it so bursts cannot starve I/O
+        png = await asyncio.to_thread(render, forecast, place.name)
     return png, forecast
 
 
@@ -734,7 +740,7 @@ async def on_error(update: object, context: Context) -> None:
         try:
             await update.effective_message.reply_text("Something went wrong. Please try again.")
         except Exception:
-            pass
+            log.warning("Could not deliver the error notice", exc_info=True)
 
 
 # --- wiring ------------------------------------------------------------------------------
@@ -752,10 +758,8 @@ def make_post_init(
 
 
 async def post_shutdown(app: Application) -> None:
-    try:
+    with contextlib.suppress(RuntimeError):  # client was never initialised
         await runtime.http().aclose()
-    except RuntimeError:
-        pass
     runtime.set_http(None)
 
 

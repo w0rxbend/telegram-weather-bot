@@ -10,12 +10,14 @@ outside of an update handler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from telegram import InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import Forbidden, RetryAfter, TelegramError
 
 from weather_bot import locations as store
 from weather_bot import schedule as sched
@@ -26,19 +28,19 @@ log = logging.getLogger(__name__)
 INTERVAL = 30.0
 
 
-async def scheduler_loop(app, interval: float = INTERVAL) -> None:  # noqa: ANN001 - PTB Application
+async def scheduler_loop(app, interval: float = INTERVAL) -> None:
     log.info("Scheduler started (tick every %.0fs)", interval)
     while True:
         try:
             await tick(app)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - keep the loop alive whatever happens
+        except Exception:
             log.exception("Scheduler tick failed")
         await asyncio.sleep(interval)
 
 
-async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
+async def tick(app, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
     sent = 0
@@ -53,7 +55,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
         try:
             await _send(app, user_id, data)
             sent += 1
-        except Exception:  # noqa: BLE001 - one user's failure must not skip the others
+        except Exception:
             log.exception("Scheduled send for user %s failed", user_id)
     if touched:
         app.mark_data_for_update_persistence(user_ids=touched)
@@ -61,7 +63,7 @@ async def tick(app, now: datetime | None = None) -> int:  # noqa: ANN001
     return sent
 
 
-async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
+async def _send(app, user_id: int, data) -> None:
     # imported lazily: bot.py imports nothing from here, but keep the dependency one-way
     from weather_bot.bot import _build_card, _caption, _card_place, _keyboard
 
@@ -80,12 +82,12 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         return
     sched.update_timezone(data, forecast.timezone)
     try:
-        await app.bot.send_photo(
+        await _send_photo_with_retry(
+            app,
             chat_id=schedule.chat_id,
             photo=png,
             caption=_caption(place, forecast, "weather"),
-            parse_mode=ParseMode.HTML,
-            reply_markup=_keyboard(place, units, "weather"),
+            keyboard=_keyboard(place, units, "weather"),
         )
     except Forbidden:
         log.info("User %s blocked the bot; schedule removed", user_id)
@@ -94,7 +96,41 @@ async def _send(app, user_id: int, data) -> None:  # noqa: ANN001
         log.warning("Scheduled send to %s failed: %s", schedule.chat_id, exc)
 
 
-def start(app, interval: float = INTERVAL) -> asyncio.Task:  # noqa: ANN001
+def _seconds(value: int | timedelta) -> float:
+    """PTB exposes ``retry_after`` as int today and as timedelta in the next major version."""
+    return value.total_seconds() if isinstance(value, timedelta) else float(value)
+
+
+async def _send_photo_with_retry(
+    app,
+    *,
+    chat_id: int,
+    photo: bytes,
+    caption: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    """Send the card; on flood control wait out ``RetryAfter`` once, then give up."""
+    for attempt in range(2):
+        try:
+            await app.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+        except RetryAfter as exc:
+            if attempt:
+                raise
+            log.warning(
+                "Flood control: waiting %ss before retrying chat %s", exc.retry_after, chat_id
+            )
+            await asyncio.sleep(exc.retry_after)
+        else:
+            return
+
+
+def start(app, interval: float = INTERVAL) -> asyncio.Task:
     return asyncio.create_task(scheduler_loop(app, interval), name="weather-scheduler")
 
 
@@ -102,9 +138,7 @@ async def stop(task: asyncio.Task | None, on_done: Callable[[], None] | None = N
     if task is None:
         return
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     if on_done:
         on_done()
