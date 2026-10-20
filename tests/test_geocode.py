@@ -67,3 +67,12 @@ async def test_search_place_no_results() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assert await search_place(client, "zzzzzz") is None
+
+
+async def test_oversized_geocode_response_falls_back() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b'{"address": {"city": "' + b"x" * 600_000 + b'"}}')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        place = await reverse_geocode(client, 12.3456, -7.891)
+    assert place.name == "12.346, -7.891"

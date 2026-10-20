@@ -140,3 +140,12 @@ async def test_fetch_forecast_api_error() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(WeatherError, match="Latitude"):
             await fetch_forecast(client, 999, 0)
+
+
+async def test_fetch_forecast_rejects_oversized_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b" " * 600_000 + b"{}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(WeatherError):
+            await fetch_forecast(client, 1.0, 2.0)

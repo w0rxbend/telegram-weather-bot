@@ -36,7 +36,7 @@
 | F-18 | High | `docker-ci.yml` (`appleboy/telegram-action@master`, `ssh-action@v1`, `scp-action@v1`, …) | Mutable refs run with Docker Hub + SSH secrets | — | **Deferred** | — |
 | F-19 | Medium | `docker-ci.yml` | No image vulnerability scan | — | **Deferred** | — |
 | F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | — | **Deferred** | — |
-| F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | — | **Deferred** (timeout + connection cap in place) | — |
+| F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpio.read_json_capped` (512 KiB, streamed); oversized → fallback / `WeatherError` | Fixed (2026-10-20 follow-up) | see `git log` |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |

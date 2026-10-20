@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import httpx
 
+from weather_bot.httpio import read_json_capped
 from weather_bot.privacy import describe_error
 
 Units = Literal["metric", "imperial"]
@@ -246,12 +247,16 @@ async def fetch_forecast(
     last_error: Exception | None = None
     for attempt in range(len(RETRY_DELAYS) + 1):
         try:
-            response = await client.get(FORECAST_URL, params=params)
-            if response.status_code in RETRY_STATUSES and attempt < len(RETRY_DELAYS):
+            async with client.stream("GET", FORECAST_URL, params=params) as response:
+                if response.status_code in RETRY_STATUSES and attempt < len(RETRY_DELAYS):
+                    retry = True
+                else:
+                    retry = False
+                    response.raise_for_status()
+                    payload = await read_json_capped(response)
+            if retry:
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue
-            response.raise_for_status()
-            payload = response.json()
             break
         except httpx.TransportError as exc:
             last_error = exc

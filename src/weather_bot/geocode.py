@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from weather_bot.httpio import read_json_capped
 from weather_bot.privacy import describe_error
 
 log = logging.getLogger(__name__)
@@ -55,9 +56,11 @@ async def reverse_geocode(
     }
     headers = {"Accept-Language": language or "en"}
     try:
-        response = await client.get(NOMINATIM_REVERSE_URL, params=params, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+        async with client.stream(
+            "GET", NOMINATIM_REVERSE_URL, params=params, headers=headers
+        ) as response:
+            response.raise_for_status()
+            data = await read_json_capped(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Reverse geocoding failed: %s", describe_error(exc))
         return fallback
@@ -83,9 +86,9 @@ async def search_place(
         "format": "json",
     }
     try:
-        response = await client.get(OPEN_METEO_GEOCODE_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
+        async with client.stream("GET", OPEN_METEO_GEOCODE_URL, params=params) as response:
+            response.raise_for_status()
+            data = await read_json_capped(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Forward geocoding failed: %s", describe_error(exc))
         return None
