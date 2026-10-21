@@ -122,8 +122,10 @@ STRINGS: dict[str, dict[Lang, str]] = {
         "Візьміть парасольку.",
     },
     "compare_usage": {
-        "en": "Usage: /compare Kyiv, Lviv (2–3 cities, separated by commas or “vs”)",
-        "uk": "Використання: /compare Київ, Львів (2–3 міста через кому або «vs»)",
+        "en": "Usage: /compare Kyiv, Lviv (2–3 cities). If a name contains a comma, separate the "
+        "cities with “vs” or “|”: /compare Paris, France vs London",
+        "uk": "Використання: /compare Київ, Львів (2–3 міста). Якщо в назві є кома, розділяйте "
+        "міста «vs» або «|»: /compare Paris, France vs London",
     },
     "compare_title": {"en": "Weather comparison", "uk": "Порівняння погоди"},
     "best_usage": {

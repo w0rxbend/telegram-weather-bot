@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 
+import pytest
+
 from forecast_helpers import set_hour, with_hours
 from weather_bot import alerts, planner
 from weather_bot.weather import Forecast
@@ -11,6 +13,25 @@ def test_split_places_accepts_commas_pipes_and_vs() -> None:
     assert planner.split_places("Kyiv, Lviv") == ["Kyiv", "Lviv"]
     assert planner.split_places("Kyiv vs Lviv | Odesa") == ["Kyiv", "Lviv", "Odesa"]
     assert planner.split_places(" , ") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Kyiv, Lviv", ["Kyiv", "Lviv"]),
+        ("Kyiv; Lviv", ["Kyiv", "Lviv"]),
+        ("Paris, France vs London", ["Paris, France", "London"]),  # vs keeps the comma
+        ("Paris, France VS. London", ["Paris, France", "London"]),
+        ("Київ | Львів | Одеса", ["Київ", "Львів", "Одеса"]),
+        ("Davos, Zürich", ["Davos", "Zürich"]),  # "vs" inside a word is not a separator
+        ("Evs, Bvs", ["Evs", "Bvs"]),
+        (" , ", []),
+    ],
+)
+def test_split_places_explicit_separators_keep_commas_inside_names(
+    text: str, expected: list[str]
+) -> None:
+    assert planner.split_places(text) == expected
 
 
 def test_parse_activity_knows_aliases() -> None:

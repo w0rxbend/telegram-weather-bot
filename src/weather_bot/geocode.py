@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -115,3 +118,36 @@ async def search_place(
         latitude=float(hit["latitude"]),
         longitude=float(hit["longitude"]),
     )
+
+
+SEARCH_CACHE_TTL = 3600.0  # city -> coordinates changes about never; an hour keeps the data fresh
+SEARCH_CACHE_MAX = 512
+_search_cache: OrderedDict[tuple[str, str], tuple[float, Place]] = OrderedDict()
+
+
+async def search_place_cached(
+    client: httpx.AsyncClient,
+    query: str,
+    language: str | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> Place | None:
+    """``search_place`` with a small in-memory cache for repeated queries.
+
+    Only hits are cached: ``search_place`` returns ``None`` both for "no such place" and for a
+    failed request, and a transient outage must not stick for an hour. This matters for inline
+    mode, where one search fires a query per pause in typing and many users look up the same
+    cities. State resets on restart.
+    """
+    key = (" ".join(query.casefold().split()), language or "")
+    now = clock()
+    cached = _search_cache.get(key)
+    if cached is not None and now - cached[0] < SEARCH_CACHE_TTL:
+        _search_cache.move_to_end(key)
+        return cached[1]
+    place = await search_place(client, query, language)
+    if place is not None:
+        _search_cache[key] = (now, place)
+        _search_cache.move_to_end(key)
+        while len(_search_cache) > SEARCH_CACHE_MAX:
+            _search_cache.popitem(last=False)
+    return place

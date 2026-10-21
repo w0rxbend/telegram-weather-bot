@@ -36,8 +36,9 @@ from weather_bot.bot import (
 )
 from weather_bot.cache import cached_forecast
 from weather_bot.caption import build_caption, weather_emoji
-from weather_bot.geocode import Place, search_place
+from weather_bot.geocode import Place, search_place_cached
 from weather_bot.i18n import ACTIVITY_NAMES, KEY_LANG, SUPPORTED, Lang, describe_weather, tr
+from weather_bot.ratelimit import RateLimiter
 from weather_bot.weather import Forecast, WeatherError, describe
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,11 @@ log = logging.getLogger(__name__)
 CB_LANG = "lang"
 INLINE_CACHE_SECONDS = 300
 INLINE_OUTLOOK_DAYS = 3
+INLINE_MIN_LENGTH = 3  # shorter text matches too many places and fires on every keystroke
+INLINE_LIMIT_PER_MINUTE = 20
+# Own budget: a search fires several queries, and sharing the card limiter would let typing
+# lock a user out of /weather.
+_inline_limiter = RateLimiter(limit=INLINE_LIMIT_PER_MINUTE)
 LANGUAGE_NAMES: dict[str, str] = {"en": "English", "uk": "Українська"}
 
 
@@ -134,7 +140,7 @@ async def cmd_alerts(update: Update, context: Context) -> None:
 async def _forecast_for(
     context: Context, text: str, language: str | None
 ) -> tuple[Place, Forecast]:
-    place = await search_place(_client(context), text, language)
+    place = await search_place_cached(_client(context), text, language)
     if place is None:
         raise LookupError(text)
     forecast = await cached_forecast(
@@ -235,7 +241,7 @@ async def on_inline_query(update: Update, context: Context) -> None:
         return
     text = inline.query.strip()
     results: list[InlineQueryResultArticle] = []
-    if 2 <= len(text) <= MAX_QUERY_LENGTH:
+    if INLINE_MIN_LENGTH <= len(text) <= MAX_QUERY_LENGTH and _inline_limiter.allow(user.id):
         try:
             place, fc = await _forecast_for(context, text, user.language_code)
         except (LookupError, WeatherError):
@@ -257,7 +263,9 @@ async def on_inline_query(update: Update, context: Context) -> None:
                     ),
                 )
             )
-    await inline.answer(results, cache_time=INLINE_CACHE_SECONDS, is_personal=True)
+    # An empty answer (too short, throttled, outage) must not be remembered by the client.
+    cache_time = INLINE_CACHE_SECONDS if results else 0
+    await inline.answer(results, cache_time=cache_time, is_personal=True)
 
 
 __all__ = [

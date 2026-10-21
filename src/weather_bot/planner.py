@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final
 
 from weather_bot.weather import Forecast, HourPoint
 
@@ -13,7 +13,7 @@ MAX_RAIN_PROBABILITY = 30  # percent; wetter hours never qualify
 HORIZON_HOURS = 24
 COMPARE_MIN_PLACES = 2
 COMPARE_MAX_PLACES = 3
-COMPARE_SEPARATORS: Final = (",", "|", " vs ", " VS ", " Vs ")
+_EXPLICIT_SEPARATOR = re.compile(r"\s*(?:\||;|\bvs\.?(?=\s|$))\s*", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -55,10 +55,14 @@ def parse_activity(text: str) -> Activity | None:
 
 
 def split_places(text: str) -> list[str]:
-    """Split "Kyiv, Lviv" / "Kyiv vs Lviv" / "Kyiv | Lviv" into city names."""
-    parts = [text]
-    for separator in COMPARE_SEPARATORS:
-        parts = [piece for part in parts for piece in part.split(separator)]
+    """Split "Kyiv, Lviv" / "Kyiv vs Lviv" / "Kyiv | Lviv" into city names.
+
+    "vs", "|" and ";" are explicit separators; when one is present, commas stay inside the
+    names ("Paris, France vs London" is two places). Without them, commas separate places.
+    """
+    parts = _EXPLICIT_SEPARATOR.split(text)
+    if len(parts) == 1:
+        parts = text.split(",")
     return [part.strip() for part in parts if part.strip()]
 
 
