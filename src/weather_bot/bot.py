@@ -52,7 +52,7 @@ from telegram.ext import (
 )
 
 from weather_bot import locations as store
-from weather_bot import runtime
+from weather_bot import runtime, telemetry
 from weather_bot import schedule as sched
 from weather_bot.cache import cached_forecast
 from weather_bot.caption import build_caption, build_sun_caption
@@ -61,6 +61,7 @@ from weather_bot.identity import sync_identity
 from weather_bot.locations import MAX_LOCATIONS, SavedLocation
 from weather_bot.ratelimit import RateLimiter
 from weather_bot.render import render_card, render_sun_card
+from weather_bot.telemetry import Ranked
 from weather_bot.weather import Forecast, Units, WeatherError
 
 log = logging.getLogger(__name__)
@@ -122,7 +123,9 @@ HELP = (
     "/schedule – pick when I should send the weather by myself "
     "(every morning, 3× a day, hourly 9–21, custom times…)\n"
     "/schedule 7:30 18:00 – custom times · /schedule off – stop\n\n"
-    "Typing any city name shows its weather without saving it."
+    "Typing any city name shows its weather without saving it.\n\n"
+    "<i>Privacy: the bot counts your commands and the cities you request, together with your "
+    "Telegram id and username, to see how it is used. It never stores message text.</i>"
 )
 
 
@@ -269,6 +272,8 @@ async def _build_card(
     render = render_sun_card if kind == "sun" else render_card
     async with _render_slots:  # Pillow work is CPU-bound: cap it so bursts cannot starve I/O
         png = await asyncio.to_thread(render, forecast, place.name)
+    if (usage := runtime.telemetry()) is not None:
+        await usage.record_card(place.name, kind)
     return png, forecast
 
 
@@ -464,6 +469,31 @@ async def cmd_units(update: Update, context: Context) -> None:
 async def cmd_help(update: Update, context: Context) -> None:
     message = _message(update)
     await message.reply_text(HELP, parse_mode=ParseMode.HTML)
+
+
+def _format_ranking(title: str, rows: list[Ranked]) -> str:
+    lines = [f"{index}. {escape(row.label)} – {row.count}" for index, row in enumerate(rows, 1)]
+    return f"<b>{title}</b>\n" + ("\n".join(lines) if lines else "–")
+
+
+async def cmd_stats(update: Update, context: Context) -> None:
+    """Usage report for the operator; silently ignored for everybody else."""
+    user = update.effective_user
+    usage = runtime.telemetry()
+    if user is None or usage is None or not runtime.is_admin(user.id):
+        return
+    report = await usage.report()
+    await _message(update).reply_text(
+        f"<b>Usage</b>: {report.users} users · {report.events} actions · {report.cards} cards\n\n"
+        + "\n\n".join(
+            (
+                _format_ranking("Top users (actions)", report.top_users),
+                _format_ranking("Top cities (cards)", report.top_cities),
+                _format_ranking("Top actions", report.top_events),
+            )
+        ),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # --- schedule ------------------------------------------------------------------------------
@@ -831,11 +861,14 @@ def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
             elif update.effective_message:
                 await update.effective_message.reply_text(RATE_LIMITED_TEXT)
             return
+        if (usage := runtime.telemetry()) is not None:
+            await usage.record_event(user.id, callback.__name__, user.username, user.language_code)
         lock = _user_locks.get(user.id)
         if lock is None:
             lock = _user_locks[user.id] = asyncio.Lock()
         async with lock:
-            await callback(update, context)
+            with telemetry.acting_as(user.id):
+                await callback(update, context)
 
     return wrapper
 
@@ -853,6 +886,7 @@ def register_handlers(app: App) -> None:
         ("schedule", _guarded(cmd_schedule)),
         ("units", _guarded(cmd_units)),
         ("help", cmd_help),
+        ("stats", cmd_stats),
     ]
     for names, callback in commands:
         # new messages only: edited messages and channel posts have no usable user_data

@@ -20,7 +20,7 @@ from typing import Any
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 
-from weather_bot import health
+from weather_bot import health, telemetry
 from weather_bot import locations as store
 from weather_bot import schedule as sched
 from weather_bot.locations import UserData
@@ -88,7 +88,8 @@ async def _send(app: App, user_id: int, data: UserData) -> None:
     place = _card_place(default)
     units = data.get("units", "metric")
     try:
-        png, forecast = await _build_card(place, units, "weather")
+        with telemetry.acting_as(user_id):
+            png, forecast = await _build_card(place, units, "weather")
     except WeatherError as exc:
         log.warning("Scheduled card for user %s skipped: %s", user_id, exc)
         return

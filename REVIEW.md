@@ -78,3 +78,8 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
 
 - F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
+
+## Follow-up pass (2026-10-21, telemetry)
+- Baseline re-run on `main` (584a81d): `pytest -q` 203 passed; ruff check/format, `mypy` (28 files), bandit clean. No new findings.
+- Feature requested by the owner: custom usage telemetry (`telemetry.py`, `/stats`, `ADMIN_USER_IDS`). 209 tests pass; ruff, mypy, bandit clean.
+- Privacy note: this stores Telegram ids/usernames. Users are told in `/help`; coordinates, message text and chat ids are not stored. Check this against your privacy obligations (GDPR) before enabling for the public.

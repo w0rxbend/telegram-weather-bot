@@ -116,6 +116,14 @@ Secrets it needs: `DOCKERHUB_USERNAME`, `DOCKERHUB_PASSWORD`, `SSH_HOST`, `SSH_U
 `SSH_KEY`, `SSH_PORT`, `TG_BOT_TOKEN`, and `TELEGRAM_NOTIFY_CHAT` / `TELEGRAM_NOTIFY_TOKEN`
 for the status messages.
 
+## Usage telemetry
+
+The bot keeps its own usage counters in `DATA_DIR/telemetry.sqlite3` (mode 0600): per Telegram
+user id (plus username and language) how often each command/button was used, and for which city
+cards were requested. Coordinates, message text and chat ids are not stored. Set
+`ADMIN_USER_IDS` and send `/stats` to see totals, top users, top cities and top actions.
+`/help` tells users that this is collected. Delete the file to reset it.
+
 ## Development
 
 ```bash
