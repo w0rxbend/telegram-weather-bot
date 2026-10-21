@@ -116,8 +116,8 @@ def test_stats_handler_is_registered_only_with_admins(usage: UsageTelemetry) -> 
 def test_stats_is_not_advertised() -> None:
     from weather_bot.identity import COMMANDS
 
-    assert "stats" not in bot.HELP
-    assert "export" not in bot.HELP
+    assert "stats" not in bot.HELP["en"]
+    assert "export" not in bot.HELP["en"]
     assert all(command.command not in {"stats", "export"} for command in COMMANDS)
 
 

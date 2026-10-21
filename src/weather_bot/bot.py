@@ -47,6 +47,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    InlineQueryHandler,
     MessageHandler,
     filters,
 )
@@ -57,6 +58,7 @@ from weather_bot import schedule as sched
 from weather_bot.cache import cached_forecast
 from weather_bot.caption import build_caption, build_sun_caption
 from weather_bot.geocode import Place, reverse_geocode, search_place
+from weather_bot.i18n import Lang, resolve_lang, tr
 from weather_bot.identity import sync_identity
 from weather_bot.locations import MAX_LOCATIONS, SavedLocation
 from weather_bot.ratelimit import RateLimiter
@@ -77,6 +79,7 @@ class UnexpectedUpdateError(RuntimeError):
 KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
+KEY_LANG_CODE = "lang_code"  # Telegram language_code, kept so background jobs can localise
 MAX_CACHED_PLACES = 5000
 MAX_QUERY_LENGTH = 80  # longest city name we search for or echo back
 
@@ -103,12 +106,7 @@ LOCATION_KEYBOARD = ReplyKeyboardMarkup(
     input_field_placeholder="…or type a city name",
 )
 
-WELCOME = (
-    "Hi {name}! I turn your location into a weather infographic.\n\n"
-    "Tap <b>📍 Share my location</b> below, or type a city name. "
-    "After that, send /weather any time for a fresh picture."
-)
-HELP = (
+HELP_EN = (
     "<b>Weather</b>\n"
     "/weather – card for your default location\n"
     "/weather 2 or /weather home – card for slot 2 / the slot called “home”\n"
@@ -125,11 +123,38 @@ HELP = (
     "/schedule – pick when I should send the weather by myself "
     "(every morning, 3× a day, hourly 9–21, custom times…)\n"
     "/schedule 7:30 18:00 – custom times · /schedule off – stop\n\n"
+    "<b>More</b>\n"
+    "/air – air quality · /alerts – rain alerts on/off · /lang – language\n"
+    "/compare Kyiv, Lviv – compare 2–3 cities · /best run – best hour to run, bike or walk\n"
+    "Inline: type <code>@bot city</code> in any chat.\n\n"
     "Typing any city name shows its weather without saving it.\n\n"
     "<i>Privacy: the bot counts your commands and the cities you request, together with your "
     "Telegram id and username, to see how it is used. It never stores message text. "
     "Usage logs are kept for 90 days. /forget erases everything stored about you.</i>"
 )
+
+
+HELP_UK = (
+    "<b>Погода</b>\n"
+    "/weather – картка для локації за замовчуванням (або /weather 2, /weather home)\n"
+    "/sun – схід і захід сонця\n"
+    "/units – °C або °F\n\n"
+    "<b>Збережені локації</b>\n"
+    "/locations – ваші слоти · /add – додати локацію · /default 2 – зробити слот основним\n"
+    "/rename 2 офіс – назвати слот · /remove 2 – видалити слот\n\n"
+    "<b>Автоматичні картки</b>\n"
+    "/schedule – коли надсилати погоду самостійно · /schedule 7:30 18:00 – свій час\n\n"
+    "<b>Ще</b>\n"
+    "/air – якість повітря · /alerts – сповіщення про дощ · /lang – мова\n"
+    "/compare Київ, Львів – порівняти 2–3 міста · /best run – найкраща година для бігу, "
+    "велосипеда чи прогулянки\n"
+    "Inline: напишіть <code>@bot місто</code> у будь-якому чаті.\n\n"
+    "Назва міста в чаті покаже погоду без збереження.\n\n"
+    "<i>Приватність: бот рахує команди та міста запитів разом із вашим Telegram id та "
+    "юзернеймом, щоб бачити, як ним користуються. Текст повідомлень не зберігається. "
+    "Логи зберігаються 90 днів. /forget видаляє все, що збережено про вас.</i>"
+)
+HELP = {"en": HELP_EN, "uk": HELP_UK}
 
 
 # --- helpers -----------------------------------------------------------------------------
@@ -166,6 +191,11 @@ def _user_data(context: Context) -> dict[str, Any]:
 
 def _client(context: Context) -> httpx.AsyncClient:
     return runtime.http()
+
+
+def _lang(context: Context) -> Lang:
+    data = _user_data(context)
+    return resolve_lang(data, data.get(KEY_LANG_CODE))
 
 
 def _units(context: Context) -> Units:
@@ -224,10 +254,10 @@ def _keyboard(place: Place, units: Units, kind: CardKind = "weather") -> InlineK
     return InlineKeyboardMarkup(rows)
 
 
-def _caption(place: Place, fc: Forecast, kind: CardKind = "weather") -> str:
+def _caption(place: Place, fc: Forecast, kind: CardKind = "weather", lang: Lang = "en") -> str:
     if kind == "sun":
-        return build_sun_caption(place.name, fc)
-    return build_caption(place.name, fc)
+        return build_sun_caption(place.name, fc, lang=lang)
+    return build_caption(place.name, fc, lang=lang)
 
 
 def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -296,7 +326,7 @@ async def _send_card(
     except WeatherError as exc:
         log.warning("Forecast failed for %s: %s", place.name, exc)
         await message.reply_text(
-            "I couldn't reach the weather service right now. Please try again in a minute.",
+            tr(_lang(context), "weather_down"),
             reply_markup=ReplyKeyboardRemove() if intro else None,
         )
         return
@@ -308,7 +338,7 @@ async def _send_card(
         )
     await message.reply_photo(
         photo=png,
-        caption=_caption(place, forecast, kind),
+        caption=_caption(place, forecast, kind, _lang(context)),
         parse_mode=ParseMode.HTML,
         reply_markup=_keyboard(place, units, kind),
     )
@@ -355,7 +385,7 @@ async def cmd_start(update: Update, context: Context) -> None:
         return
     _ask_for_location(context)
     await message.reply_text(
-        WELCOME.format(name=escape(user.first_name)),
+        tr(_lang(context), "welcome", name=escape(user.first_name)),
         parse_mode=ParseMode.HTML,
         reply_markup=LOCATION_KEYBOARD,
     )
@@ -508,7 +538,7 @@ async def on_forget_callback(update: Update, context: Context) -> None:
 
 async def cmd_help(update: Update, context: Context) -> None:
     message = _message(update)
-    await message.reply_text(HELP, parse_mode=ParseMode.HTML)
+    await message.reply_text(HELP[_lang(context)], parse_mode=ParseMode.HTML)
 
 
 async def cmd_export(update: Update, context: Context) -> None:
@@ -800,7 +830,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         await query.edit_message_media(
             media=InputMediaPhoto(
-                media=png, caption=_caption(place, forecast, kind), parse_mode=ParseMode.HTML
+                media=png,
+                caption=_caption(place, forecast, kind, _lang(context)),
+                parse_mode=ParseMode.HTML,
             ),
             reply_markup=_keyboard(place, units, kind),
         )
@@ -810,7 +842,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
         log.warning("Editing media failed (%s); sending a new photo instead", exc)
         await message.reply_photo(
             photo=png,
-            caption=_caption(place, forecast, kind),
+            caption=_caption(place, forecast, kind, _lang(context)),
             parse_mode=ParseMode.HTML,
             reply_markup=_keyboard(place, units, kind),
         )
@@ -922,6 +954,8 @@ def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
             elif update.effective_message:
                 await update.effective_message.reply_text(RATE_LIMITED_TEXT)
             return
+        if context.user_data is not None:
+            context.user_data[KEY_LANG_CODE] = user.language_code
         if (usage := runtime.telemetry()) is not None:
             await usage.record_event(user.id, callback.__name__, user.username, user.language_code)
         lock = _user_locks.get(user.id)
@@ -935,6 +969,8 @@ def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
 
 
 def register_handlers(app: App) -> None:
+    from weather_bot import handlers_extra as extra  # lazy: it imports helpers from this module
+
     commands: list[tuple[str | list[str], Handler]] = [
         ("start", _guarded(cmd_start)),
         (["add", "setup"], _guarded(cmd_add)),
@@ -947,6 +983,11 @@ def register_handlers(app: App) -> None:
         ("schedule", _guarded(cmd_schedule)),
         ("units", _guarded(cmd_units)),
         ("forget", _guarded(cmd_forget)),
+        ("lang", _guarded(extra.cmd_lang)),
+        ("air", _guarded(extra.cmd_air, rate_limited=True)),
+        ("alerts", _guarded(extra.cmd_alerts)),
+        ("compare", _guarded(extra.cmd_compare, rate_limited=True)),
+        ("best", _guarded(extra.cmd_best, rate_limited=True)),
         ("help", cmd_help),
     ]
     for names, callback in commands:
@@ -985,4 +1026,10 @@ def register_handlers(app: App) -> None:
         CallbackQueryHandler(_guarded(on_schedule_callback), pattern=rf"^{CB_SCHEDULE}\|")
     )
     app.add_handler(CallbackQueryHandler(_guarded(on_forget_callback), pattern=rf"^{CB_FORGET}\|"))
+    app.add_handler(
+        CallbackQueryHandler(
+            _guarded(extra.on_lang_callback), pattern=rf"^{extra.CB_LANG}\|(en|uk)$"
+        )
+    )
+    app.add_handler(InlineQueryHandler(_guarded(extra.on_inline_query, rate_limited=True)))
     app.add_error_handler(on_error)

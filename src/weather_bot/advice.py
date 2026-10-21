@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from weather_bot.i18n import DEFAULT_LANG, Lang, tr
 from weather_bot.weather import Forecast
 
 RAIN_PROBABILITY = 50  # percent; at or above this, suggest an umbrella
@@ -9,13 +10,23 @@ UV_SPF = 6  # WHO "high" band starts here
 WIND_KMH = 30.0
 MPH_PER_KMH = 0.621371
 
-_CLOTHING_BANDS: tuple[tuple[float, str], ...] = (  # (upper bound in °C, tip)
-    (-5.0, "🧥 Winter coat"),
-    (5.0, "🧥 Warm jacket"),
-    (14.0, "🧥 Light jacket"),
-    (22.0, "👕 Long sleeves"),
+_CLOTHING_BANDS: tuple[tuple[float, str], ...] = (  # (upper bound in °C, string key)
+    (-5.0, "coat_winter"),
+    (5.0, "coat_warm"),
+    (14.0, "coat_light"),
+    (22.0, "sleeves"),
 )
-_WARM_TIP = "🩳 T-shirt weather"
+_WARM_TIP = "tshirt"
+_EMOJI = {
+    "coat_winter": "🧥",
+    "coat_warm": "🧥",
+    "coat_light": "🧥",
+    "sleeves": "👕",
+    "tshirt": "🩳",
+    "umbrella": "☂️",
+    "spf": "🧴",
+    "windy": "💨",
+}
 
 
 def _to_celsius(value: float, fc: Forecast) -> float:
@@ -26,14 +37,14 @@ def _wind_kmh(fc: Forecast) -> float:
     return fc.wind_gusts / MPH_PER_KMH if fc.units == "imperial" else fc.wind_gusts
 
 
-def advice_line(fc: Forecast) -> str:
+def advice_line(fc: Forecast, lang: Lang = DEFAULT_LANG) -> str:
     """Tips joined by " · ", e.g. "🧥 Light jacket · ☂️ Umbrella"; judged on how it feels now."""
     feels = _to_celsius(fc.apparent_temperature, fc)
-    tips = [next((tip for limit, tip in _CLOTHING_BANDS if feels < limit), _WARM_TIP)]
+    keys = [next((key for limit, key in _CLOTHING_BANDS if feels < limit), _WARM_TIP)]
     if fc.today.precipitation_probability_max >= RAIN_PROBABILITY:
-        tips.append("☂️ Umbrella")
+        keys.append("umbrella")
     if fc.today.uv_index_max >= UV_SPF:
-        tips.append("🧴 SPF")
+        keys.append("spf")
     if _wind_kmh(fc) >= WIND_KMH:
-        tips.append("💨 Windy")
-    return " · ".join(tips)
+        keys.append("windy")
+    return " · ".join(f"{_EMOJI[key]} {tr(lang, key)}" for key in keys)

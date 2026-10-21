@@ -6,11 +6,12 @@ from unittest.mock import AsyncMock, patch
 
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
+from forecast_helpers import with_hours
+from weather_bot import alerts, scheduler
 from weather_bot import locations as store
 from weather_bot import schedule as sched
-from weather_bot import scheduler
 from weather_bot.geocode import Place
-from weather_bot.weather import Forecast
+from weather_bot.weather import Forecast, WeatherError
 
 KYIV = Place("Kyiv, Ukraine", 50.45, 30.52)
 
@@ -139,3 +140,59 @@ async def test_vanished_chat_removes_schedule(forecast: Forecast) -> None:
     with patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))):
         await scheduler.tick(app, datetime(2026, 10, 18, 4, 30, tzinfo=UTC))
     assert sched.get_schedule(data) is None
+
+
+def alert_app(forecast_with_rain: Forecast, *, opted_in: bool = True):
+    data: dict = {"units": "metric", "lang_code": "uk"}
+    store.add_location(data, KYIV)
+    if opted_in:
+        alerts.enable(data, chat_id=555)
+    app = make_app({1: data})
+    app.bot = SimpleNamespace(send_message=AsyncMock())
+    return app, data
+
+
+def rainy(forecast: Forecast) -> Forecast:
+    import dataclasses
+
+    hours = [
+        dataclasses.replace(h, precipitation_probability=80) if h.time.hour == 16 else h
+        for h in forecast.hourly
+    ]
+    return dataclasses.replace(forecast, hourly=hours)
+
+
+async def test_rain_alert_is_sent_once_in_the_users_language(forecast: Forecast) -> None:
+    app, _ = alert_app(forecast)
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 1
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 12, 0, tzinfo=UTC)) == 0
+    call = app.bot.send_message.await_args.kwargs
+    assert call["chat_id"] == 555 and "Ймовірний дощ" in call["text"] and "16:00" in call["text"]
+    assert app.update_persistence.await_count >= 1
+
+
+async def test_no_alert_without_rain_or_opt_in(forecast: Forecast) -> None:
+    app, _ = alert_app(forecast)
+    dry = with_hours(forecast)
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=dry)):
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 0
+    quiet, _ = alert_app(forecast, opted_in=False)
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):
+        assert await scheduler.alert_tick(quiet, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 0
+    app.bot.send_message.assert_not_awaited()
+
+
+async def test_blocked_user_loses_rain_alerts(forecast: Forecast) -> None:
+    app, data = alert_app(forecast)
+    app.bot.send_message = AsyncMock(side_effect=Forbidden("bot was blocked by the user"))
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):
+        await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC))
+    assert alerts.chat_id_for(data) is None
+
+
+async def test_forecast_failure_skips_the_alert(forecast: Forecast) -> None:
+    app, _ = alert_app(forecast)
+    failing = AsyncMock(side_effect=WeatherError("down"))
+    with patch("weather_bot.scheduler.cached_forecast", failing):
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 0

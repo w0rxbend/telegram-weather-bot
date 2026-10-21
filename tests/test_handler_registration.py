@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
-from telegram import Chat, Location, Message, Update, User
+from telegram import Chat, InlineQuery, Location, Message, MessageEntity, Update, User
 from telegram.ext import Application, ApplicationBuilder
 
 from weather_bot import bot
@@ -55,3 +56,14 @@ def test_channel_post_is_ignored(app: Application) -> None:
 def test_edited_command_is_ignored(app: Application) -> None:
     edited = message(text="/weather")
     assert matching_callbacks(app, Update(update_id=1, edited_message=edited)) == set()
+
+
+def test_new_commands_and_inline_queries_are_routed(app: Application) -> None:
+    for command in ("lang", "air", "alerts", "compare", "best", "forget"):
+        entity = MessageEntity(MessageEntity.BOT_COMMAND, 0, len(command) + 1)
+        command_message = message(text=f"/{command}", entities=[entity])
+        command_message.set_bot(SimpleNamespace(username="weatherbot"))  # type: ignore[arg-type]
+        update = Update(update_id=1, message=command_message)
+        assert matching_callbacks(app, update), command
+    inline = Update(update_id=2, inline_query=InlineQuery("1", USER, "Kyiv", ""))
+    assert "on_inline_query" in matching_callbacks(app, inline)
