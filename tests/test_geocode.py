@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 
 from weather_bot.geocode import reverse_geocode, search_place
+from weather_bot.ratelimit import MinIntervalGate
 
 
 async def test_reverse_geocode_builds_city_country() -> None:
@@ -67,3 +68,22 @@ async def test_search_place_no_results() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assert await search_place(client, "zzzzzz") is None
+
+
+async def test_reverse_geocode_spaces_requests_through_the_gate() -> None:
+    events: list[str] = []
+    now = [0.0]
+
+    async def sleep(delay: float) -> None:
+        events.append(f"sleep {delay}")
+        now[0] += delay
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events.append("request")
+        return httpx.Response(200, json={"address": {"city": "Kyiv", "country": "Ukraine"}})
+
+    gate = MinIntervalGate(1.0, clock=lambda: now[0], sleep=sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await reverse_geocode(client, 50.45, 30.52, gate=gate)
+        await reverse_geocode(client, 49.84, 24.03, gate=gate)
+    assert events == ["request", "sleep 1.0", "request"]

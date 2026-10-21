@@ -619,7 +619,11 @@ async def on_location(update: Update, context: Context) -> None:
         return
     await message.chat.send_action(ChatAction.TYPING)
     place = await reverse_geocode(
-        _client(context), loc.latitude, loc.longitude, user.language_code if user else None
+        _client(context),
+        loc.latitude,
+        loc.longitude,
+        user.language_code if user else None,
+        gate=runtime.nominatim_gate(),
     )
     await _save_and_send(message, context, place)
 

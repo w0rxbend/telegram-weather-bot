@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from weather_bot import bot
+from weather_bot import bot, runtime
 from weather_bot import locations as store
 from weather_bot.geocode import Place
 from weather_bot.weather import Forecast
@@ -130,6 +130,16 @@ async def test_location_message_adds_slot_and_replies(forecast: Forecast) -> Non
     intro = update.effective_message.reply_text.await_args.args[0]
     assert "Saved slot <b>1</b>" in intro and "(default)" in intro
     update.effective_message.reply_photo.assert_awaited_once()
+
+
+async def test_location_message_geocodes_through_the_nominatim_gate(forecast: Forecast) -> None:
+    ctx = make_context()
+    update = make_update(location=SimpleNamespace(latitude=50.45, longitude=30.52))
+    geocode = AsyncMock(return_value=KYIV)
+    p1, p2 = patched(forecast)
+    with patch.object(bot, "reverse_geocode", geocode), p1, p2:
+        await bot.on_location(update, ctx)
+    assert geocode.await_args.kwargs["gate"] is runtime.nominatim_gate()
 
 
 async def test_second_location_is_not_default(forecast: Forecast) -> None:
