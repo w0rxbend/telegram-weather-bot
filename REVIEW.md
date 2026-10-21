@@ -33,9 +33,9 @@
 | F-15 | Low | `bot.py` (15× `assert`), `scheduler.py`, `main.py` | `assert` guards stripped by `-O`; 54 strict-typing errors; inaccessible messages crash | Typed accessors, annotations, `UnexpectedUpdateError` | Fixed | e739a8b |
 | F-16 | Medium | `.github/workflows/docker-ci.yml:80` | `TG_BOT_TOKEN` interpolated into remote shell script; no `permissions:` | `envs:` input; `permissions: contents: read` | Fixed | 42ec996 |
 | F-17 | Low | repo | No dependabot | `.github/dependabot.yml` (pip, actions, docker) | Fixed | 42ec996 |
-| F-18 | High | `docker-ci.yml` (`appleboy/telegram-action@master`, `ssh-action@v1`, `scp-action@v1`, …) | Mutable refs run with Docker Hub + SSH secrets | — | **Deferred** | — |
-| F-19 | Medium | `docker-ci.yml` | No image vulnerability scan | — | **Deferred** | — |
-| F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | — | **Deferred** | — |
+| F-18 | High | `docker-ci.yml` (`appleboy/telegram-action@master`, `ssh-action@v1`, `scp-action@v1`, …) | Mutable refs run with Docker Hub + SSH secrets | Pinned all actions to SHAs (tag in comment) | Fixed (2026-10-21) | see git log |
+| F-19 | Medium | `docker-ci.yml` | No image vulnerability scan | Trivy scan before push, fails on fixable HIGH/CRITICAL | Fixed (not run in Actions) | see git log |
+| F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | Decision: SQLite, see `docs/decisions/0001-state-storage.md` | **Decided, implementation pending your go-ahead** | — |
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
@@ -81,3 +81,5 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Fixed F-26 and F-21. All other deferred items (F-18, F-19, F-20, F-22, F-23, F-25) unchanged and still need your action above.
 - Secret scan of full git history: only the `.env.example` placeholder matched a bot-token regex.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
+
+- F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
