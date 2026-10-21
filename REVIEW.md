@@ -37,6 +37,7 @@
 | F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | `SqlitePersistence` (JSON rows, WAL, 0600) + one-off pickle import (`legacy_state.py`); see `docs/decisions/0001-state-storage.md` | Fixed (import untested on real data) | see git log |
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
+| F-27 | Medium | `.github/workflows/ci.yml` vs `Dockerfile` (`python:3.14-slim` after dependabot #43) | Production image runs 3.14 but CI tested 3.13 only; minimum 3.11 untested | Matrix `3.11` + `3.14`; suite verified locally on 3.11/3.13/3.14 | Fixed (2026-10-21, pass 3; matrix not run in Actions) | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -78,3 +79,11 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
 
 - F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
+
+## Third pass (2026-10-21)
+- Baseline (HEAD = origin/main 584a81d): `poetry run pytest -q` 203 passed; `ruff check`/`ruff format --check` clean;
+  `mypy` strict clean (28 files); `bandit -c pyproject.toml -r src` clean;
+  `pip-audit -r <pip freeze> --no-deps --disable-pip`: no known vulnerabilities.
+- New finding F-27 (above). Verified `pytest -q` 203 passed on Python 3.13 and 3.14 in fresh venvs (`uv`, deps from `poetry export --with dev`).
+- Still open: F-22, F-23, F-25 (unchanged, product/capacity decisions).
+- Not run: Docker build, GitHub Actions (new matrix, Trivy, SHA pins).
