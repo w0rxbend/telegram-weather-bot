@@ -7,8 +7,8 @@
 - **After:** 193 tests green, ruff/format/mypy `--strict`/bandit/pip-audit all clean; CI now runs all
   of them. PII is out of logs, state writes are atomic (0600), per-user locking and rate limiting
   are in place, config is validated at startup, container is read-only with a healthcheck.
-- **Top remaining risks:** third-party GitHub Actions are not pinned to SHAs (F-18); state is still a
-  pickle file (F-20); no image vulnerability scan (F-19).
+- **Top remaining risks:** state is still a pickle file (F-20, SQLite decided, not yet implemented); the
+  new SHA pins and Trivy step have not run in Actions yet.
 - No secrets were found in the working tree or git history (regex scan for bot-token shapes and
   `*_KEY=`/`*_TOKEN=` literals). No rotation needed.
 
@@ -46,11 +46,7 @@
 Tooling and standards: 174be60, lock sync: see `git log`.
 
 ## Deferred — exact action required from you
-- **F-18:** pin each third-party action to a commit SHA, e.g. `uses: appleboy/ssh-action@<40-char sha> # v1.x`.
-  I could not resolve SHAs from this session (GitHub access is scoped to this repo). Dependabot
-  (added) will keep them current once pinned. Pin `appleboy/telegram-action` first (`@master`).
-- **F-19:** add `aquasecurity/trivy-action` (fail on HIGH/CRITICAL) after the build step.
-- **F-20:** decide whether to move to SQLite (see `TODO.md`); needs a one-off migration run against a copy of the production volume.
+- **F-20:** approve the SQLite plan in `docs/decisions/0001-state-storage.md`; the migration must first be run against a copy of the production volume.
 - **F-22 / F-23:** product/capacity decisions; see `TODO.md`.
 - **Deploy check:** after merge, run `docker compose up -d` and confirm `docker inspect --format '{{.State.Health.Status}}' <container>` becomes `healthy`, and that the bot starts with `read_only: true`.
 
@@ -78,7 +74,7 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Baseline: `pytest -q` 194 passed; ruff check/format clean; `mypy` strict clean (26 files); bandit clean;
   pip-audit (`poetry show` pins, `--no-deps --disable-pip`): 1 vulnerability (certifi, PYSEC-2026-4320).
 - Final: 198 passed; ruff, mypy (27 files), bandit clean; pip-audit: no known vulnerabilities.
-- Fixed F-26 and F-21. All other deferred items (F-18, F-19, F-20, F-22, F-23, F-25) unchanged and still need your action above.
+- Fixed F-26 and F-21. Remaining: F-20 (implementation), F-22, F-23, F-25.
 - Secret scan of full git history: only the `.env.example` placeholder matched a bot-token regex.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
 
