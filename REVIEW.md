@@ -36,7 +36,8 @@
 | F-18 | High | `docker-ci.yml` (`appleboy/telegram-action@master`, `ssh-action@v1`, `scp-action@v1`, …) | Mutable refs run with Docker Hub + SSH secrets | — | **Deferred** | — |
 | F-19 | Medium | `docker-ci.yml` | No image vulnerability scan | — | **Deferred** | — |
 | F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | — | **Deferred** | — |
-| F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | — | **Deferred** (timeout + connection cap in place) | — |
+| F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
+| F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -72,3 +73,11 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - GitHub Actions were not executed; the CI workflow edits are YAML-validated only.
 - Telegram was not contacted; behaviour of handlers is covered by unit tests with fake updates.
 - `AtomicPicklePersistence` swaps `self.filepath` temporarily; safe because PTB dumps synchronously on the event loop, but re-check on PTB major upgrades.
+
+## Follow-up pass (2026-10-21)
+- Baseline: `pytest -q` 194 passed; ruff check/format clean; `mypy` strict clean (26 files); bandit clean;
+  pip-audit (`poetry show` pins, `--no-deps --disable-pip`): 1 vulnerability (certifi, PYSEC-2026-4320).
+- Final: 198 passed; ruff, mypy (27 files), bandit clean; pip-audit: no known vulnerabilities.
+- Fixed F-26 and F-21. All other deferred items (F-18, F-19, F-20, F-22, F-23, F-25) unchanged and still need your action above.
+- Secret scan of full git history: only the `.env.example` placeholder matched a bot-token regex.
+- Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
