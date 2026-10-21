@@ -140,3 +140,12 @@ a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while Git
 - Secret scan of full history (bot-token regex) and of `src` for hard-coded credentials: no matches. No rotation needed.
 - Not run: Docker build/Trivy, GitHub Actions, Telegram.
 - Branch is `claude/dazzling-heisenberg-4xnydn` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Review pass (2026-10-21, scheduled re-check)
+- Baseline on `main` (73a277e), Python 3.11.17 venv: `pytest -q` 235 passed; `ruff check src tests scripts` and
+  `ruff format --check .` clean; `mypy` (strict) clean on 30 files; `bandit -q -c pyproject.toml -r src` rc 0;
+  `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
+- No commits since the previous pass, so no new code to review. Secret regex scan of tracked files: no matches.
+- No new findings; no code changed. F-22, F-23, F-25 and F-34 stay deferred (product/legal decisions, see above).
+- Not run: Docker build/Trivy, GitHub Actions, Telegram.
+- Branch is `claude/dazzling-heisenberg-1kiu1i` (environment-assigned), not `chore/review-hardening-<date>`.
