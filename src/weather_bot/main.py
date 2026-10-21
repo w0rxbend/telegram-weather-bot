@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pickle  # nosec B403
-import time
-from pathlib import Path
 
 import httpx
 from telegram.ext import ApplicationBuilder
@@ -14,25 +11,12 @@ from telegram.ext import ApplicationBuilder
 from weather_bot import scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import load_settings
-from weather_bot.persistence import AtomicPicklePersistence
+from weather_bot.legacy_state import import_pickle_state, quarantine_corrupt_state
+from weather_bot.persistence import SqlitePersistence
 from weather_bot.runtime import App
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 log = logging.getLogger(__name__)
-
-
-def quarantine_corrupt_state(path: Path) -> None:
-    """Move an unreadable pickle aside so a bad file cannot crash-loop the bot."""
-    if not path.exists():
-        return
-    # Safe by construction: this is the bot's own state file in DATA_DIR, never user input.
-    try:
-        with path.open("rb") as fh:
-            pickle.load(fh)  # noqa: S301  # nosec B301
-    except Exception as exc:  # noqa: BLE001 - any unpickling failure counts
-        backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
-        path.rename(backup)
-        log.error("State file %s was unreadable (%s); moved to %s", path, exc, backup)
 
 
 def start() -> None:
@@ -40,7 +24,9 @@ def start() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     settings = load_settings()
-    quarantine_corrupt_state(settings.persistence_file)
+    store = SqlitePersistence(settings.persistence_file)
+    quarantine_corrupt_state(settings.legacy_pickle_file)
+    import_pickle_state(settings.legacy_pickle_file, store)
 
     def http_factory() -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -63,7 +49,7 @@ def start() -> None:
     application = (
         ApplicationBuilder()
         .token(settings.bot_token)
-        .persistence(AtomicPicklePersistence(filepath=settings.persistence_file))
+        .persistence(store)
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)

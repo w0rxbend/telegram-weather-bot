@@ -3,7 +3,7 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 
-from weather_bot.main import quarantine_corrupt_state
+from weather_bot.legacy_state import quarantine_corrupt_state
 
 
 def test_quarantine_moves_unreadable_state(tmp_path: Path) -> None:
