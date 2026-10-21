@@ -39,12 +39,13 @@
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
 | F-27 | Medium | `Dockerfile`, `docker-ci.yml` | The Trivy gate (F-19) failed on every push to main: its five HIGH/CRITICAL hits are the copies vendored inside pip 26.2.1 (certifi 2026.6.17, msgpack 1.1.2, setuptools 70.3.0, urllib3 2.7.0), not our lock. A red gate blocks the image push **and the deploy**, so nothing merged since #49 has shipped | `pip uninstall -y pip` in the runtime stage after the requirements are installed | Fixed (checked in a venv; not run in Actions) | see git log |
-| F-28 | Medium | `docker-ci.yml`, `ci.yml` | Deploy ran on any push to main without running the tests; CI tested 3.13 while the image runs 3.14 (#43) | `test` job that `build-and-deploy` needs (3.14); CI matrix 3.13 + 3.14 (suite and mypy pass on 3.14.6) | Fixed (not run in Actions) | see git log |
+| F-28 | Medium | `docker-ci.yml`, `ci.yml` | Deploy ran on any push to main without running the tests; CI tested 3.13 while the image runs 3.14 (#43) | `test` job that `build-and-deploy` needs (3.14); CI matrix 3.11 (lowest supported) + 3.13 (dev container) + 3.14 (image); suite, ruff and mypy pass on 3.11.17, 3.13.16 and 3.14.6 | Fixed (not run in Actions) | see git log |
 | F-29 | Low | `geocode.py` | Nominatim's one-request-per-second policy was documented but not enforced | `ratelimit.MinIntervalGate` via `runtime.nominatim_gate()` | Fixed | see git log |
 | F-30 | Medium | `main.py` | No Bot API flood control: a 429 reached the handler or the scheduler | `AIORateLimiter(max_retries=3)` (extra `rate-limiter`, adds aiolimiter 1.2.1) | Fixed | see git log |
 | F-31 | Medium | `bot.py` `on_card_callback` | A failed refresh answered the callback query twice; Telegram rejects the second answer, so the user saw the generic error | Notice is a chat reply | Fixed | see git log |
 | F-32 | Low | `bot.py` `/weather <text>` | Whole argument echoed back; with the prefix it can pass Telegram's 4096 limit | Echo capped at `MAX_QUERY_LENGTH` (80) | Fixed | see git log |
 | F-33 | Low | `scheduler.py` `tick` | "Already sent" marks were saved only after sending; a crash mid-tick resent delivered cards | Save before sending and again after | Fixed | see git log |
+| F-34 | Low | `main.py` | `SqlitePersistence.close()` was never called, so the WAL is left for the next start to recover | `post_shutdown` wrapper closes the store after PTB's final flush | Fixed | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -98,8 +99,8 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
   Final: 222 passed on 3.14.6; ruff, format, mypy (28 files), bandit clean; `pip-audit` on the exported lock: no known
   vulnerabilities.
 - Method: run each branch's test suite against `main`'s source and read the commits, then port what is missing
-  (F-27 to F-33) instead of merging branches that carry competing versions of what #41 and #49 already contain.
-  New tests for F-31, F-32, F-33 and the oversize cap were confirmed to fail without the fix.
+  (F-27 to F-34) instead of merging branches that carry competing versions of what #41 and #49 already contain.
+  New tests for F-31, F-32, F-33, F-34 and the oversize cap were confirmed to fail without the fix.
 - Not run: the Docker build and Trivy scan (no daemon here), GitHub Actions, Telegram.
 
 | Branch | PR | Disposition |
@@ -113,6 +114,9 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
 | `snyk-fix-*`, `restyled/snyk-fix-*` | #18-#35 | Retired: they bump Python to 3.13 alpha/beta/rc tags; the image is on 3.14-slim |
 | `renovate/configure`, `restyled/renovate/configure` | - | Retired: 2023 Jitsi-bot era (root `main.py`) plus `renovate.json`; Dependabot is the dependency bot |
 | `dependabot/*` | #43-#48 | Merged |
+| `claude/dazzling-heisenberg-imfi0p` (= `chore/review-hardening-2026-10-21`, tip d520250) | #50 | Opened by another session while this pass ran. Superseded: its CI matrix is covered by F-28, its store-close fix is F-34 |
+| `claude/dazzling-heisenberg-h46q9s` (tip 6388665) | #51 | Same. Its idea of testing 3.11 is in the F-28 matrix |
+| `claude/dazzling-heisenberg-5o3sjy` | #52 | Not touched: new telemetry feature (per-user usage and city statistics, admin `/stats`) still under development in another session. Needs its own review, in particular against F-02 (no personal data in logs) |
 
 Closed PRs keep their commits reachable through `refs/pull/<n>/head` after the branches are deleted; the one branch without
 a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while GitHub still holds the object.
