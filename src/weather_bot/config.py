@@ -25,6 +25,10 @@ class Settings:
 
     @property
     def persistence_file(self) -> Path:
+        return self.data_dir / "bot_state.sqlite3"
+
+    @property
+    def legacy_pickle_file(self) -> Path:
         return self.data_dir / "bot_state.pickle"
 
 

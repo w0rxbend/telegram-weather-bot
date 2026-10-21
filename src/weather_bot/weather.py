@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import httpx
 
+from weather_bot.httpcap import get_capped
 from weather_bot.privacy import describe_error
 
 Units = Literal["metric", "imperial"]
@@ -246,7 +247,7 @@ async def fetch_forecast(
     last_error: Exception | None = None
     for attempt in range(len(RETRY_DELAYS) + 1):
         try:
-            response = await client.get(FORECAST_URL, params=params)
+            response = await get_capped(client, FORECAST_URL, params=params)
             if response.status_code in RETRY_STATUSES and attempt < len(RETRY_DELAYS):
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue

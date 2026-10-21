@@ -1,6 +1,6 @@
 """Process-wide runtime objects that must never end up in persisted bot_data.
 
-PTB's PicklePersistence pickles ``bot_data`` as a whole; an httpx client in there makes
+The persistence layer serialises ``bot_data`` as a whole; an httpx client in there makes
 the dump fail, which truncates the single state file and breaks the next startup.
 """
 

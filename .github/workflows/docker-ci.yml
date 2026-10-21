@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify me (commit)
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -29,28 +29,45 @@ jobs:
             📊 See changes: https://github.com/${{ github.repository }}/commit/${{github.sha}}
       - id: checkout
         name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
       - id: setup-qemu
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - id: setup-builder
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build image for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          platforms: linux/amd64
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
       - id: build
-        name: Build
-        uses: docker/build-push-action@v6
+        name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: linux/amd64,linux/arm64/v8
           context: .
           push: true
           tags: ${{ env.IMAGE }}
+          cache-from: type=gha
       - name: Notify me (image update)
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -63,7 +80,7 @@ jobs:
 
             🐋 https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot/tags
       - name: Copy compose file to remote machine
-        uses: appleboy/scp-action@v1
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -75,7 +92,7 @@ jobs:
         name: Connect to remote machine and deploy
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}  # passed via envs:, never pasted into the script
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -90,7 +107,7 @@ jobs:
             docker compose up -d
             docker system prune -f
       - name: Notify me
-        uses: appleboy/telegram-action@master
+        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
