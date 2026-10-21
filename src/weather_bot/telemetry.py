@@ -31,7 +31,15 @@ MAX_CITY_LENGTH = 120
 DAYS_SHOWN = 14
 EXPORT_ROW_LIMIT = 200_000  # newest rows; keeps the CSV under Telegram's upload limit
 SECONDS_PER_DAY = 86_400
+LOG_RETENTION_DAYS = 90  # raw event_log rows older than this are deleted (F-34)
 ALIAS_SEPARATOR = " · "  # SavedLocation.card_name is "<alias> · <place>"
+
+_FORGET_STATEMENTS = (
+    "DELETE FROM users WHERE user_id = ?",
+    "DELETE FROM events WHERE user_id = ?",
+    "DELETE FROM cities WHERE user_id = ?",
+    "DELETE FROM event_log WHERE user_id = ?",
+)
 
 _actor: ContextVar[int | None] = ContextVar("telemetry_actor", default=None)
 
@@ -78,6 +86,7 @@ class UsageTelemetry:
         path.touch(mode=OWNER_ONLY, exist_ok=True)
         path.chmod(OWNER_ONLY)
         self._lock = threading.Lock()
+        self._last_prune = 0
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(
@@ -155,6 +164,18 @@ class UsageTelemetry:
                 )
             )
         self._write(*statements)
+        self._prune_if_due(now)
+
+    def _prune_if_due(self, now: int) -> None:
+        """Delete expired raw log rows, at most once a day (aggregates are kept)."""
+        if now - self._last_prune < SECONDS_PER_DAY:
+            return
+        self._last_prune = now
+        cutoff = now - LOG_RETENTION_DAYS * SECONDS_PER_DAY
+        self._write(("DELETE FROM event_log WHERE ts < ?", (cutoff,)))
+
+    def _forget(self, user_id: int) -> None:
+        self._write(*((sql, (user_id,)) for sql in _FORGET_STATEMENTS))
 
     def _daily(self, now: datetime) -> list[Ranked]:
         today = int(now.timestamp()) // SECONDS_PER_DAY
@@ -232,6 +253,10 @@ class UsageTelemetry:
         if user_id is None:
             return
         await asyncio.to_thread(self._record, user_id, None, None, f"card:{kind}", city_label(city))
+
+    async def forget_user(self, user_id: int) -> None:
+        """Erase everything recorded about ``user_id`` (the /forget command)."""
+        await asyncio.to_thread(self._forget, user_id)
 
     async def report(self) -> UsageReport:
         return await asyncio.to_thread(self._report)

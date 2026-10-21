@@ -49,13 +49,12 @@
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
 | F-25 | Low | `bot.py` `_remember_place` | Shared `bot_data["places"]` can be primed by any user (stale label only) | — | **Deferred** | — |
-| F-34 | Low | `telemetry.py` `event_log` (:97-99, `_record`) | The raw event log (user id, username, event, city) grows without bound and is never pruned; `/export` caps only what is read. Disk growth and open-ended retention of identifiers | — | **Deferred** (retention period is a product/legal decision) | — |
+| F-34 | Low | `telemetry.py` `event_log` (:97-99, `_record`) | The raw event log (user id, username, event, city) grows without bound and is never pruned; `/export` caps only what is read. Disk growth and open-ended retention of identifiers | Raw rows older than `LOG_RETENTION_DAYS` (90) are deleted, at most once a day; aggregates stay. `/forget` erases a user's rows | Fixed (90 days is my choice; change the constant) | see git log |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
 ## Deferred — exact action required from you
 - **F-20 deploy check:** before the first deploy, back up the data volume; after it, confirm the log line `Imported N users` and that `bot_state.pickle.migrated` exists next to `bot_state.sqlite3`. Rollback: stop the bot, delete the `.sqlite3*` files, rename `.migrated` back to `.pickle`, deploy the previous image.
-- **F-34:** choose a retention period for `event_log` (e.g. 90 days). Then add a `DELETE FROM event_log WHERE ts < ?` on startup and daily; I did not guess the number.
 - **F-22 / F-23:** product/capacity decisions; see `TODO.md`.
 - **F-27 / F-28:** after the merge, open the *Docker Image CI* run on `main` and confirm the Trivy step passes. Neither fix has run in Actions; if Trivy still fails, the log names the package.
 - **Deploy check:** after merge, run `docker compose up -d` and confirm `docker inspect --format '{{.State.Health.Status}}' <container>` becomes `healthy`, and that the bot starts with `read_only: true`.
@@ -136,7 +135,13 @@ a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while Git
   `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
 - Scope: the code added since the last pass (`telemetry.py`, `/stats`, `/export`, flood control). Admin commands are registered
   only for `ADMIN_USER_IDS` and re-check the numeric id; CSV cells are formula-escaped; HTML output is escaped; SQL is parameterised.
-- One new finding, F-34 (Low, deferred). No Critical/High/Medium findings, so no code changed and no new tests were needed.
+- One new finding, F-34 (Low); fixed in the feature commit below. No Critical/High/Medium findings, so no code changed and no new tests were needed.
 - Secret scan of full history (bot-token regex) and of `src` for hard-coded credentials: no matches. No rotation needed.
 - Not run: Docker build/Trivy, GitHub Actions, Telegram.
 - Branch is `claude/dazzling-heisenberg-4xnydn` (environment-assigned), not `chore/review-hardening-<date>`.
+
+### Features added in the same PR (owner said: decide everything, keep it optimal)
+- `/forget` (confirm button): drops the user's persisted state and all telemetry rows (GDPR erasure); `/help` states the 90-day log retention.
+- `advice.py`: one caption line with clothing, umbrella (rain >= 50%), SPF (UV >= 6) and wind (gusts >= 30 km/h) tips. Thresholds are constants.
+- Final: `pytest -q` 243 passed; ruff, ruff format, mypy (31 files), bandit clean.
+- Not done, by choice: localisation, air quality, rain push alerts, inline mode (larger, need product input; listed in `TODO.md`).

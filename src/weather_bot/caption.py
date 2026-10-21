@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from html import escape
 
+from weather_bot.advice import advice_line
 from weather_bot.render.theme import uv_label
 from weather_bot.sun import fmt_change, fmt_duration, sun_info
 from weather_bot.weather import DayPoint, Forecast, IconKind, compass, describe, icon_kind
@@ -69,6 +70,7 @@ def build_caption(place_name: str, fc: Forecast, outlook_days: int = 4) -> str:
         f"({today.precipitation_sum:.1f} {fc.precip_unit})  "
         f"🔆 UV {today.uv_index_max:.0f} {uv_label(today.uv_index_max)}",
         f"🌅 {today.sunrise.strftime('%H:%M')}  🌇 {today.sunset.strftime('%H:%M')}",
+        advice_line(fc),
     ]
 
     upcoming = fc.daily[1 : 1 + outlook_days]

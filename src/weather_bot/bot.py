@@ -93,6 +93,7 @@ CB_DEFAULT_SLOT = "d"
 CB_REMOVE_SLOT = "x"
 CB_LIST = "l"
 CB_SCHEDULE = "sch"
+CB_FORGET = "forget"
 
 LOCATION_KEYBOARD = ReplyKeyboardMarkup(
     [[KeyboardButton("📍 Share my location", request_location=True)]],
@@ -126,7 +127,8 @@ HELP = (
     "/schedule 7:30 18:00 – custom times · /schedule off – stop\n\n"
     "Typing any city name shows its weather without saving it.\n\n"
     "<i>Privacy: the bot counts your commands and the cities you request, together with your "
-    "Telegram id and username, to see how it is used. It never stores message text.</i>"
+    "Telegram id and username, to see how it is used. It never stores message text. "
+    "Usage logs are kept for 90 days. /forget erases everything stored about you.</i>"
 )
 
 
@@ -466,6 +468,42 @@ async def cmd_units(update: Update, context: Context) -> None:
     _user_data(context)[KEY_UNITS] = new_units
     label = "°F and mph" if new_units == "imperial" else "°C and km/h"
     await message.reply_text(f"Units set to {label}. Send /weather to see it.")
+
+
+FORGET_PROMPT = (
+    "Erase everything stored about you: saved locations, schedule, units and usage statistics? "
+    "This cannot be undone."
+)
+FORGET_DONE = "Done. Everything stored about you has been erased. Send /start to begin again."
+
+
+async def cmd_forget(update: Update, context: Context) -> None:
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🗑 Erase my data", callback_data=f"{CB_FORGET}|yes"),
+                InlineKeyboardButton("Cancel", callback_data=f"{CB_FORGET}|no"),
+            ]
+        ]
+    )
+    await _message(update).reply_text(FORGET_PROMPT, reply_markup=keyboard)
+
+
+async def on_forget_callback(update: Update, context: Context) -> None:
+    query = _callback(update)
+    user = update.effective_user
+    message = _query_message(query)
+    await query.answer()
+    if user is None or message is None:
+        return
+    if (query.data or "").endswith("|yes"):
+        context.application.drop_user_data(user.id)  # memory now, persisted row on this update
+        if (usage := runtime.telemetry()) is not None:
+            await usage.forget_user(user.id)
+        text = FORGET_DONE
+    else:
+        text = "Cancelled. Nothing was erased."
+    await message.edit_text(text)
 
 
 async def cmd_help(update: Update, context: Context) -> None:
@@ -908,6 +946,7 @@ def register_handlers(app: App) -> None:
         ("rename", _guarded(cmd_rename)),
         ("schedule", _guarded(cmd_schedule)),
         ("units", _guarded(cmd_units)),
+        ("forget", _guarded(cmd_forget)),
         ("help", cmd_help),
     ]
     for names, callback in commands:
@@ -945,4 +984,5 @@ def register_handlers(app: App) -> None:
     app.add_handler(
         CallbackQueryHandler(_guarded(on_schedule_callback), pattern=rf"^{CB_SCHEDULE}\|")
     )
+    app.add_handler(CallbackQueryHandler(_guarded(on_forget_callback), pattern=rf"^{CB_FORGET}\|"))
     app.add_error_handler(on_error)
