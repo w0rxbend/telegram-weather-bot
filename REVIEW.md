@@ -37,6 +37,8 @@
 | F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | `SqlitePersistence` (JSON rows, WAL, 0600) + one-off pickle import (`legacy_state.py`); see `docs/decisions/0001-state-storage.md` | Fixed (import untested on real data) | see git log |
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
+| F-27 | Low | `main.py` (`SqlitePersistence.close` never called) | SQLite connection left open at shutdown (WAL not checkpointed cleanly) | Close the store in `post_shutdown` | Fixed (2026-10-21, second pass) | see git log |
+| F-28 | Medium | `Dockerfile:2,15` vs `ci.yml` | Image moved to `python:3.14-slim` (Dependabot #43) but CI only tested 3.13 | CI matrix 3.13 + 3.14; suite run on 3.14 locally: 203 passed | Fixed | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -78,3 +80,13 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
 
 - F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
+
+## Second pass (2026-10-21, after PR #49 merged)
+- Baseline on `main` 584a81d: `poetry run pytest -q` 203 passed; `poetry run ruff check src tests scripts` and `ruff format --check` clean;
+  `poetry run mypy` strict clean (28 files); `poetry run bandit -q -c pyproject.toml -r src` clean;
+  `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities. Same results after the fixes.
+- Also ran the suite on Python 3.14.6 (uv venv, pins from `poetry show`): 203 passed.
+- Reviewed the new `persistence.py` / `legacy_state.py`: row writes are transactional, schema version is checked, file is 0600. Fixed F-27, F-28.
+- Uncertainty: the pickle import calls `json.dumps` on the old `user_data`; a value that is not JSON-serialisable would stop startup with `TypeError`
+  (the pickle is left in place, so rollback is trivial). Current code only stores str/int/float/list/dict, but real data was not available to check.
+- Docker image was not built here (docker daemon not exercised); Actions not run.

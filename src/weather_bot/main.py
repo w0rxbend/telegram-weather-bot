@@ -36,6 +36,10 @@ def start() -> None:
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
+    async def shutdown(app: App) -> None:
+        await post_shutdown(app)
+        store.close()
+
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list[asyncio.Task[None]] = []
 
@@ -53,7 +57,7 @@ def start() -> None:
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)
-        .post_shutdown(post_shutdown)
+        .post_shutdown(shutdown)
         .build()
     )
     register_handlers(application)
