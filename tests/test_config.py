@@ -43,3 +43,13 @@ def test_bad_timeout_fails(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("HTTP_TIMEOUT", value)
     with pytest.raises(RuntimeError, match="HTTP_TIMEOUT"):
         load_settings()
+
+
+def test_admin_ids_parsed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("TG_BOT_TOKEN", "123456789:" + "a" * 30)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ADMIN_USER_IDS", "1, 22,")
+    assert load_settings().admin_ids == frozenset({1, 22})
+    monkeypatch.setenv("ADMIN_USER_IDS", "me")
+    with pytest.raises(RuntimeError, match="ADMIN_USER_IDS"):
+        load_settings()

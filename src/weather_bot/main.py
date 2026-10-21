@@ -8,12 +8,13 @@ import logging
 import httpx
 from telegram.ext import ApplicationBuilder
 
-from weather_bot import scheduler
+from weather_bot import runtime, scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import load_settings
 from weather_bot.legacy_state import import_pickle_state, quarantine_corrupt_state
 from weather_bot.persistence import SqlitePersistence
 from weather_bot.runtime import App
+from weather_bot.telemetry import UsageTelemetry
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 log = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ def start() -> None:
 
     settings = load_settings()
     store = SqlitePersistence(settings.persistence_file)
+    runtime.set_telemetry(UsageTelemetry(settings.telemetry_file))
+    runtime.set_admin_ids(settings.admin_ids)
     quarantine_corrupt_state(settings.legacy_pickle_file)
     import_pickle_state(settings.legacy_pickle_file, store)
 
