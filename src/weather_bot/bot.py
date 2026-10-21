@@ -60,7 +60,7 @@ from weather_bot.geocode import Place, reverse_geocode, search_place
 from weather_bot.identity import sync_identity
 from weather_bot.locations import MAX_LOCATIONS, SavedLocation
 from weather_bot.ratelimit import RateLimiter
-from weather_bot.render import render_card, render_sun_card
+from weather_bot.render import render_card, render_stats_card, render_sun_card
 from weather_bot.telemetry import Ranked
 from weather_bot.weather import Forecast, Units, WeatherError
 
@@ -483,7 +483,11 @@ async def cmd_stats(update: Update, context: Context) -> None:
     if user is None or usage is None or not runtime.is_admin(user.id):
         return
     report = await usage.report()
-    await _message(update).reply_text(
+    message = _message(update)
+    async with _render_slots:
+        png = await asyncio.to_thread(render_stats_card, report, datetime.now(UTC))
+    await message.reply_photo(photo=png)
+    await message.reply_text(
         f"<b>Usage</b>: {report.users} users · {report.events} actions · {report.cards} cards\n\n"
         + "\n\n".join(
             (

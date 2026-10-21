@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +56,7 @@ async def test_card_without_actor_is_ignored(usage: UsageTelemetry) -> None:
 def _stats_update(user_id: int) -> SimpleNamespace:
     message = MagicMock()
     message.reply_text = AsyncMock()
+    message.reply_photo = AsyncMock()
     return SimpleNamespace(effective_message=message, effective_user=SimpleNamespace(id=user_id))
 
 
@@ -64,9 +66,27 @@ async def test_stats_is_admin_only(usage: UsageTelemetry) -> None:
     stranger = _stats_update(1)
     await bot.cmd_stats(stranger, SimpleNamespace())  # type: ignore[arg-type]
     stranger.effective_message.reply_text.assert_not_called()
+    stranger.effective_message.reply_photo.assert_not_called()
 
     admin = _stats_update(7)
     await bot.cmd_stats(admin, SimpleNamespace())  # type: ignore[arg-type]
+    assert admin.effective_message.reply_photo.call_args.kwargs["photo"][:4] == b"\x89PNG"
     text = admin.effective_message.reply_text.call_args.args[0]
     assert "1 users" in text
     assert "<b>x</b>" not in text  # usernames are HTML-escaped
+
+
+def test_stats_card_renders_with_and_without_data() -> None:
+    from datetime import datetime
+
+    from PIL import Image
+
+    from weather_bot.render import render_stats_card
+    from weather_bot.telemetry import Ranked, UsageReport
+
+    rows = [Ranked(f"A very long city name number {i}, Ukraine " * 2, 100 - i) for i in range(12)]
+    full = UsageReport(5, 1234, 99, rows, rows, rows)
+    empty = UsageReport(0, 0, 0, [], [], [])
+    for report in (full, empty):
+        png = render_stats_card(report, datetime(2026, 10, 21, 12, 0))
+        assert Image.open(io.BytesIO(png)).size[0] == 1080
