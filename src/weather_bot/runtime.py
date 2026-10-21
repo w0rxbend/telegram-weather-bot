@@ -50,3 +50,7 @@ def set_admin_ids(ids: frozenset[int]) -> None:
 
 def is_admin(user_id: int) -> bool:
     return user_id in _admin_ids
+
+
+def admin_ids() -> frozenset[int]:
+    return _admin_ids

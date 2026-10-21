@@ -90,3 +90,29 @@ def test_stats_card_renders_with_and_without_data() -> None:
     for report in (full, empty):
         png = render_stats_card(report, datetime(2026, 10, 21, 12, 0))
         assert Image.open(io.BytesIO(png)).size[0] == 1080
+
+
+def _stats_handlers(admin_ids: frozenset[int]) -> list[object]:
+    from telegram.ext import Application, CommandHandler
+
+    runtime.set_admin_ids(admin_ids)
+    app = Application.builder().token("123456789:" + "a" * 30).build()
+    bot.register_handlers(app)
+    return [
+        h
+        for group in app.handlers.values()
+        for h in group
+        if isinstance(h, CommandHandler) and "stats" in h.commands
+    ]
+
+
+def test_stats_handler_is_registered_only_with_admins(usage: UsageTelemetry) -> None:
+    assert _stats_handlers(frozenset()) == []
+    assert len(_stats_handlers(frozenset({7}))) == 1
+
+
+def test_stats_is_not_advertised() -> None:
+    from weather_bot.identity import COMMANDS
+
+    assert "stats" not in bot.HELP
+    assert all(command.command != "stats" for command in COMMANDS)

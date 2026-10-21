@@ -890,11 +890,20 @@ def register_handlers(app: App) -> None:
         ("schedule", _guarded(cmd_schedule)),
         ("units", _guarded(cmd_units)),
         ("help", cmd_help),
-        ("stats", cmd_stats),
     ]
     for names, callback in commands:
         # new messages only: edited messages and channel posts have no usable user_data
         app.add_handler(CommandHandler(names, callback, filters=filters.UpdateType.MESSAGE))
+    admin_ids = runtime.admin_ids()
+    if admin_ids:
+        # not in /help or the command menu, and not even matched for anyone but the admins
+        app.add_handler(
+            CommandHandler(
+                "stats",
+                cmd_stats,
+                filters=filters.UpdateType.MESSAGE & filters.User(user_id=admin_ids),
+            )
+        )
     app.add_handler(
         MessageHandler(
             filters.LOCATION & filters.UpdateType.MESSAGE, _guarded(on_location, rate_limited=True)
