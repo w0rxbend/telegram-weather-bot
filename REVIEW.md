@@ -153,3 +153,12 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Security/robustness notes: every new input is length-checked (`MAX_QUERY_LENGTH`), HTML-escaped, `callback_data` for `/lang` is whitelisted, alert marks are persisted before sending, blocked users are unsubscribed, outbound calls reuse the capped, timeout-bound client.
 - Known limits: `/compare` makes up to 3 uncached geocode calls per command; `/best` ignores wind; card PNGs are English only.
 - Final: `pytest -q` 287 passed; ruff, ruff format, mypy strict (36 files), bandit clean.
+
+## Review pass (2026-10-21, scheduled re-check)
+- Baseline on `main` (73a277e), Python 3.11.17 venv: `pytest -q` 235 passed; `ruff check src tests scripts` and
+  `ruff format --check .` clean; `mypy` (strict) clean on 30 files; `bandit -q -c pyproject.toml -r src` rc 0;
+  `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
+- No commits since the previous pass, so no new code to review. Secret regex scan of tracked files: no matches.
+- No new findings; no code changed. F-22, F-23, F-25 and F-34 stay deferred (product/legal decisions, see above).
+- Not run: Docker build/Trivy, GitHub Actions, Telegram.
+- Branch is `claude/dazzling-heisenberg-1kiu1i` (environment-assigned), not `chore/review-hardening-<date>`.
