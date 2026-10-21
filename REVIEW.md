@@ -100,8 +100,8 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
 - Merged #43-#48 (Dependabot: Python 3.14-slim, setup-buildx 4.4.1, setup-qemu 4.4.0, setup-python 7.0.0,
   upload-artifact 7.0.2, build-push-action 7.4.0) after green CI.
 - Baseline on `main`: `pytest` 203 passed (3.13 and 3.14.6); ruff, format, mypy (28 files), bandit clean.
-  Final: 223 passed on 3.11.17, 3.13.16 and 3.14.6; ruff, format, mypy (28 files), bandit clean; `pip-audit` on the exported lock: no known
-  vulnerabilities.
+  After merging #52 (telemetry, 209 tests) into this branch, final: 235 passed on 3.11.17, 3.13.16 and 3.14.6; ruff, format, mypy (30 files),
+  bandit clean; `pip-audit` on the exported lock: no known vulnerabilities (checked before that merge; the lock gained only `aiolimiter`).
 - Method: run each branch's test suite against `main`'s source and read the commits, then port what is missing
   (F-27 to F-34) instead of merging branches that carry competing versions of what #41 and #49 already contain.
   New tests for F-31, F-32, F-33, F-34 and the oversize cap were confirmed to fail without the fix.
