@@ -2,7 +2,7 @@
 
 * Reverse geocoding (coordinates -> place name) uses Nominatim / OpenStreetMap.
   Nominatim's usage policy requires an identifying User-Agent and at most one request
-  per second; the bot only calls it once per setup, so that is comfortably within limits.
+  per second across all users, so callers pass a ``MinIntervalGate`` to space them out.
 * Forward geocoding (city name -> coordinates) uses Open-Meteo's geocoding API, for people
   on clients that cannot share a location (for example Telegram Desktop).
 """
@@ -16,6 +16,7 @@ import httpx
 
 from weather_bot.httpcap import get_capped
 from weather_bot.privacy import describe_error
+from weather_bot.ratelimit import MinIntervalGate
 
 log = logging.getLogger(__name__)
 
@@ -42,9 +43,16 @@ def _pick_locality(address: dict[str, str]) -> str | None:
 
 
 async def reverse_geocode(
-    client: httpx.AsyncClient, latitude: float, longitude: float, language: str | None = None
+    client: httpx.AsyncClient,
+    latitude: float,
+    longitude: float,
+    language: str | None = None,
+    gate: MinIntervalGate | None = None,
 ) -> Place:
-    """Return a human-readable place for the coordinates; never raises."""
+    """Return a human-readable place for the coordinates; never raises.
+
+    ``gate`` spaces calls out to respect Nominatim's one-request-per-second policy.
+    """
     fallback = Place(
         name=f"{latitude:.3f}, {longitude:.3f}", latitude=latitude, longitude=longitude
     )
@@ -55,6 +63,8 @@ async def reverse_geocode(
         "zoom": 12,
     }
     headers = {"Accept-Language": language or "en"}
+    if gate is not None:
+        await gate.wait()
     try:
         response = await get_capped(client, NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()

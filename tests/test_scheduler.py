@@ -38,8 +38,23 @@ async def test_tick_sends_due_card_once(forecast: Forecast) -> None:
     call = app.bot.send_photo.await_args.kwargs
     assert call["chat_id"] == 777 and call["photo"] == b"png"
     assert "Kyiv, Ukraine" in call["caption"]
-    assert app.marked == [{"user_ids": [1]}]
-    app.update_persistence.assert_awaited_once()
+    assert app.marked == [{"user_ids": [1]}, {"user_ids": [1]}]
+    assert app.update_persistence.await_count == 2  # marks saved before sending, results after
+
+
+async def test_tick_persists_sent_marks_before_sending(forecast: Forecast) -> None:
+    data: dict = {}
+    store.add_location(data, KYIV)
+    sched.set_schedule(data, times=["07:30"], preset="morning", tz="Europe/Kyiv", chat_id=777)
+    app = make_app({1: data})
+    order: list[str] = []
+    app.update_persistence = AsyncMock(side_effect=lambda: order.append("persist"))
+    app.bot.send_photo = AsyncMock(side_effect=lambda **_: order.append("send"))
+    now = datetime(2026, 10, 18, 4, 31, tzinfo=UTC)
+    with patch("weather_bot.bot._build_card", AsyncMock(return_value=(b"png", forecast))):
+        await scheduler.tick(app, now)
+    # a crash between the send and the final save must not resend the card after a restart
+    assert order == ["persist", "send", "persist"]
 
 
 async def test_tick_skips_users_without_schedule_or_not_due(forecast: Forecast) -> None:

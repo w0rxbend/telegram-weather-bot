@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from weather_bot import bot
-from weather_bot.ratelimit import RateLimiter
+from weather_bot import bot, runtime
+from weather_bot.ratelimit import MinIntervalGate, RateLimiter
 
 
 def test_rate_limiter_allows_limit_then_blocks_then_recovers() -> None:
@@ -28,6 +28,50 @@ def test_rate_limiter_evicts_idle_users(monkeypatch: pytest.MonkeyPatch) -> None
     now[0] = 20
     limiter.allow(3)
     assert set(limiter._hits) == {3}
+
+
+class FakeTime:
+    """Deterministic clock whose ``sleep`` just moves time forward."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def clock(self) -> float:
+        return self.now
+
+    async def sleep(self, delay: float) -> None:
+        self.sleeps.append(delay)
+        self.now += delay
+
+
+async def test_min_interval_gate_spaces_consecutive_calls() -> None:
+    t = FakeTime()
+    gate = MinIntervalGate(1.0, clock=t.clock, sleep=t.sleep)
+    await gate.wait()  # nothing came before: no wait
+    assert t.sleeps == []
+    await gate.wait()
+    assert t.sleeps == [1.0]
+    t.now += 5.0  # idle for longer than the interval: no wait either
+    await gate.wait()
+    assert t.sleeps == [1.0]
+
+
+async def test_min_interval_gate_serialises_concurrent_callers() -> None:
+    t = FakeTime()
+    gate = MinIntervalGate(1.0, clock=t.clock, sleep=t.sleep)
+    await asyncio.gather(*(gate.wait() for _ in range(4)))
+    assert t.sleeps == [1.0, 1.0, 1.0]  # the first caller is free, the rest queue up
+    assert t.now == 3.0
+
+
+def test_nominatim_gate_is_shared_and_follows_the_usage_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime, "_nominatim_gate", None)
+    gate = runtime.nominatim_gate()
+    assert gate is runtime.nominatim_gate()
+    assert gate.interval == 1.0  # Nominatim: at most one request per second
 
 
 def _update(user_id: int = 1, *, callback: bool = False) -> SimpleNamespace:

@@ -23,6 +23,9 @@ cancelled; render concurrency capped at the CPU count.
 
 Items below that are now done are marked **[done]** in their heading; the rest stay open.
 
+Later passes are recorded in `REVIEW.md` (F-18 to F-33); headings marked **[done]** below were
+brought in line with the code on 2026-10-21.
+
 ---
 
 ## Robustness
@@ -41,7 +44,7 @@ logical corruption can be rolled back by hand. Files live in `DATA_DIR`.
 **Verify.** Unit test: patch `pickle.dump` to raise midway and assert the original file is
 intact. Kill the container with `docker kill` during load and confirm state survives.
 
-### P1 · Move state from pickle to SQLite
+### P1 · Move state from pickle to SQLite **[done: `SqlitePersistence` + one-off pickle import, see docs/decisions/0001-state-storage.md]**
 **Why.** A single pickle rewrites *all* users on every flush (default every 60 s when anything
 changed), loads everything into memory, and cannot be inspected or migrated safely. Pickle also
 executes arbitrary code on load if the file is ever tampered with.
@@ -55,7 +58,7 @@ entirely; the data model is already dict/JSON-friendly (`locations.py`, `schedul
 **Verify.** Round-trip tests per module; run the migration against a copy of the production
 file (`docker cp`).
 
-### P1 · Telegram flood control for scheduled sends **[partly done in #41: RetryAfter retry; AIORateLimiter still open]**
+### P1 · Telegram flood control for scheduled sends **[done: RetryAfter retry in #41, `AIORateLimiter` in the 2026-10-21 consolidation pass]**
 **Why.** At a popular slot (07:30) the scheduler sends one photo per user back-to-back.
 Telegram allows ~30 messages/second overall and 1 message/second per chat; over that it
 returns `RetryAfter`, which is currently just logged, so the user misses the card.
@@ -150,7 +153,7 @@ Sentry (`sentry-sdk`) for exception reports; redact `update` payloads (see secur
 
 ## Security
 
-### P1 · Pin GitHub Actions and stop interpolating secrets into shell scripts **[secrets via envs done in #41; SHA pinning still open]**
+### P1 · Pin GitHub Actions and stop interpolating secrets into shell scripts **[done: secrets via envs in #41, SHA pins F-18]**
 **Why.** `appleboy/telegram-action@master` and `appleboy/ssh-action@v1` / `scp-action@v1`
 track mutable refs; a compromised upstream commit runs with your Docker Hub and SSH
 secrets. The deploy step writes `export TG_BOT_TOKEN=${{ secrets.TG_BOT_TOKEN }}` into a
@@ -201,7 +204,7 @@ user, so the impact is a stale label, not injection.
 collapse whitespace). Scope the places cache by user (`user_data`) or drop it: saved slots
 already carry their names, and one-off cities can be re-geocoded on refresh.
 
-### P2 · Dependency and image hygiene **[pip-audit, Dependabot, read_only container done in #41; Trivy still open]**
+### P2 · Dependency and image hygiene **[done: pip-audit, Dependabot, read_only in #41; Trivy gate F-19, unblocked in F-27]**
 **Why.** The image is rebuilt from `python:3.13-slim` on every push, but nothing re-pins or
 audits dependencies, and there is no SBOM or vulnerability scan since `.whitesource` was
 removed.
@@ -212,7 +215,7 @@ HIGH/CRITICAL; enable Dependabot for pip (weekly). Run the container with
 `read_only: true` and `tmpfs: /tmp` in `docker-compose.yaml` (only `/data` needs writes),
 and `cap_drop: [ALL]`.
 
-### P3 · Outbound request hardening **[redirects off + connection cap done in #41; size guard still open]**
+### P3 · Outbound request hardening **[done: redirects off + connection cap in #41, 1 MB response cap F-21]**
 **Why.** The bot calls three public APIs with a 15 s timeout, follows redirects, and has no
 response size limit. A misbehaving endpoint could hold connections or return a huge body.
 
