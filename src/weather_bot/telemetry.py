@@ -9,6 +9,8 @@ a storage error is logged and never reaches the user.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
 import sqlite3
 import stat
@@ -17,7 +19,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -25,6 +28,9 @@ log = logging.getLogger(__name__)
 OWNER_ONLY = stat.S_IRUSR | stat.S_IWUSR
 TOP_LIMIT = 10
 MAX_CITY_LENGTH = 120
+DAYS_SHOWN = 14
+EXPORT_ROW_LIMIT = 200_000  # newest rows; keeps the CSV under Telegram's upload limit
+SECONDS_PER_DAY = 86_400
 ALIAS_SEPARATOR = " · "  # SavedLocation.card_name is "<alias> · <place>"
 
 _actor: ContextVar[int | None] = ContextVar("telemetry_actor", default=None)
@@ -54,6 +60,12 @@ class UsageReport:
     top_users: list[Ranked]
     top_cities: list[Ranked]
     top_events: list[Ranked]
+    daily: list[Ranked] = field(default_factory=list)  # last DAYS_SHOWN UTC days, oldest first
+
+
+def _csv_safe(value: str) -> str:
+    """Stop spreadsheet apps from running a cell as a formula."""
+    return f"'{value}" if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
 
 
 def city_label(place_name: str) -> str:
@@ -79,6 +91,11 @@ class UsageTelemetry:
             CREATE TABLE IF NOT EXISTS cities (
                 user_id INTEGER NOT NULL, city TEXT NOT NULL, count INTEGER NOT NULL,
                 last_seen INTEGER NOT NULL, PRIMARY KEY (user_id, city));
+            CREATE TABLE IF NOT EXISTS event_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, event TEXT NOT NULL, city TEXT);
+            CREATE INDEX IF NOT EXISTS event_log_ts ON event_log (ts);
+            CREATE INDEX IF NOT EXISTS event_log_user ON event_log (user_id, ts);
             """
         )
 
@@ -98,11 +115,17 @@ class UsageTelemetry:
         except sqlite3.Error as exc:
             log.warning("Telemetry write failed: %s", exc)
 
-    def _record_event(
-        self, user_id: int, username: str | None, language: str | None, event: str
+    def _record(
+        self,
+        user_id: int,
+        username: str | None,
+        language: str | None,
+        event: str,
+        city: str | None = None,
     ) -> None:
+        """One transaction: the raw log row plus the user and counter rows derived from it."""
         now = int(time.time())
-        self._write(
+        statements: list[tuple[str, tuple[object, ...]]] = [
             (
                 "INSERT INTO users (user_id, username, language, first_seen, last_seen) "
                 "VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "
@@ -117,17 +140,53 @@ class UsageTelemetry:
                 "last_seen = excluded.last_seen",
                 (user_id, event, now),
             ),
-        )
-
-    def _record_city(self, user_id: int, city: str) -> None:
-        self._write(
             (
-                "INSERT INTO cities (user_id, city, count, last_seen) VALUES (?, ?, 1, ?) "
-                "ON CONFLICT(user_id, city) DO UPDATE SET count = count + 1, "
-                "last_seen = excluded.last_seen",
-                (user_id, city, int(time.time())),
+                "INSERT INTO event_log (ts, user_id, event, city) VALUES (?, ?, ?, ?)",
+                (now, user_id, event, city),
+            ),
+        ]
+        if city is not None:
+            statements.append(
+                (
+                    "INSERT INTO cities (user_id, city, count, last_seen) VALUES (?, ?, 1, ?) "
+                    "ON CONFLICT(user_id, city) DO UPDATE SET count = count + 1, "
+                    "last_seen = excluded.last_seen",
+                    (user_id, city, now),
+                )
             )
-        )
+        self._write(*statements)
+
+    def _daily(self, now: datetime) -> list[Ranked]:
+        today = int(now.timestamp()) // SECONDS_PER_DAY
+        first = today - DAYS_SHOWN + 1
+        rows = self._db.execute(
+            "SELECT ts / ?, COUNT(*) FROM event_log WHERE ts >= ? GROUP BY 1",
+            (SECONDS_PER_DAY, first * SECONDS_PER_DAY),
+        ).fetchall()
+        counts = dict(rows)
+        return [
+            Ranked(
+                (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(days=day)).strftime("%d"),
+                int(counts.get(day, 0)),
+            )
+            for day in range(first, today + 1)
+        ]
+
+    def _export_csv(self) -> str:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT l.ts, l.user_id, COALESCE(u.username, ''), l.event, COALESCE(l.city, '') "
+                "FROM event_log l LEFT JOIN users u USING (user_id) "
+                "ORDER BY l.id DESC LIMIT ?",
+                (EXPORT_ROW_LIMIT,),
+            ).fetchall()
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(["time_utc", "user_id", "username", "event", "city"])
+        for ts, user_id, username, event, city in reversed(rows):
+            stamp = datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%d %H:%M:%S")
+            writer.writerow([stamp, user_id, _csv_safe(username), event, _csv_safe(city)])
+        return out.getvalue()
 
     def _report(self) -> UsageReport:
         def ranked(sql: str) -> list[Ranked]:
@@ -149,6 +208,7 @@ class UsageTelemetry:
                 top_cities=ranked(
                     "SELECT city, SUM(count) AS n FROM cities GROUP BY city ORDER BY n DESC LIMIT ?"
                 ),
+                daily=self._daily(datetime.now(UTC)),
                 top_events=ranked(
                     "SELECT event, SUM(count) AS n FROM events GROUP BY event "
                     "ORDER BY n DESC LIMIT ?"
@@ -164,15 +224,18 @@ class UsageTelemetry:
     async def record_event(
         self, user_id: int, event: str, username: str | None = None, language: str | None = None
     ) -> None:
-        await asyncio.to_thread(self._record_event, user_id, username, language, event)
+        await asyncio.to_thread(self._record, user_id, username, language, event)
 
     async def record_card(self, city: str, kind: str) -> None:
-        """Count one delivered card for the current actor (see :func:`acting_as`)."""
+        """Log one delivered card for the current actor (see :func:`acting_as`)."""
         user_id = _actor.get()
         if user_id is None:
             return
-        await asyncio.to_thread(self._record_city, user_id, city_label(city))
-        await asyncio.to_thread(self._record_event, user_id, None, None, f"card:{kind}")
+        await asyncio.to_thread(self._record, user_id, None, None, f"card:{kind}", city_label(city))
 
     async def report(self) -> UsageReport:
         return await asyncio.to_thread(self._report)
+
+    async def export_csv(self) -> str:
+        """The raw event log (time, user, event, city), newest ``EXPORT_ROW_LIMIT`` rows."""
+        return await asyncio.to_thread(self._export_csv)

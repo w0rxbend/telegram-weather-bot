@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import stat
 from pathlib import Path
@@ -57,6 +58,7 @@ def _stats_update(user_id: int) -> SimpleNamespace:
     message = MagicMock()
     message.reply_text = AsyncMock()
     message.reply_photo = AsyncMock()
+    message.reply_document = AsyncMock()
     return SimpleNamespace(effective_message=message, effective_user=SimpleNamespace(id=user_id))
 
 
@@ -102,17 +104,49 @@ def _stats_handlers(admin_ids: frozenset[int]) -> list[object]:
         h
         for group in app.handlers.values()
         for h in group
-        if isinstance(h, CommandHandler) and "stats" in h.commands
+        if isinstance(h, CommandHandler) and h.commands & {"stats", "export"}
     ]
 
 
 def test_stats_handler_is_registered_only_with_admins(usage: UsageTelemetry) -> None:
     assert _stats_handlers(frozenset()) == []
-    assert len(_stats_handlers(frozenset({7}))) == 1
+    assert len(_stats_handlers(frozenset({7}))) == 2
 
 
 def test_stats_is_not_advertised() -> None:
     from weather_bot.identity import COMMANDS
 
     assert "stats" not in bot.HELP
-    assert all(command.command != "stats" for command in COMMANDS)
+    assert "export" not in bot.HELP
+    assert all(command.command not in {"stats", "export"} for command in COMMANDS)
+
+
+async def test_event_log_and_csv_export(usage: UsageTelemetry) -> None:
+    await usage.record_event(1, "cmd_weather", "=evil", "en")
+    with telemetry.acting_as(1):
+        await usage.record_card("home · Kyiv, Ukraine", "weather")
+    rows = list(csv.reader(io.StringIO(await usage.export_csv())))
+    assert rows[0] == ["time_utc", "user_id", "username", "event", "city"]
+    assert [r[1:] for r in rows[1:]] == [
+        ["1", "'=evil", "cmd_weather", ""],
+        ["1", "'=evil", "card:weather", "Kyiv, Ukraine"],
+    ]
+    assert rows[1][0][:2] == "20"
+
+
+async def test_daily_activity_covers_last_days(usage: UsageTelemetry) -> None:
+    await usage.record_event(1, "cmd_weather")
+    report = await usage.report()
+    assert len(report.daily) == telemetry.DAYS_SHOWN
+    assert report.daily[-1].count == 1
+    assert sum(day.count for day in report.daily[:-1]) == 0
+
+
+async def test_export_is_admin_only(usage: UsageTelemetry) -> None:
+    runtime.set_admin_ids(frozenset({7}))
+    stranger = _stats_update(1)
+    await bot.cmd_export(stranger, SimpleNamespace())  # type: ignore[arg-type]
+    stranger.effective_message.reply_document.assert_not_called()
+    admin = _stats_update(7)
+    await bot.cmd_export(admin, SimpleNamespace())  # type: ignore[arg-type]
+    admin.effective_message.reply_document.assert_called_once()

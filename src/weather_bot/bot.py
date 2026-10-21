@@ -471,6 +471,19 @@ async def cmd_help(update: Update, context: Context) -> None:
     await message.reply_text(HELP, parse_mode=ParseMode.HTML)
 
 
+async def cmd_export(update: Update, context: Context) -> None:
+    """Raw event log as CSV (time, user id, username, event, city) for the operator."""
+    user = update.effective_user
+    usage = runtime.telemetry()
+    if user is None or usage is None or not runtime.is_admin(user.id):
+        return
+    csv_text = await usage.export_csv()
+    await _message(update).reply_document(
+        document=csv_text.encode(),
+        filename=f"usage-{datetime.now(UTC):%Y%m%d-%H%M}.csv",
+    )
+
+
 def _format_ranking(title: str, rows: list[Ranked]) -> str:
     lines = [f"{index}. {escape(row.label)} – {row.count}" for index, row in enumerate(rows, 1)]
     return f"<b>{title}</b>\n" + ("\n".join(lines) if lines else "–")
@@ -897,13 +910,9 @@ def register_handlers(app: App) -> None:
     admin_ids = runtime.admin_ids()
     if admin_ids:
         # not in /help or the command menu, and not even matched for anyone but the admins
-        app.add_handler(
-            CommandHandler(
-                "stats",
-                cmd_stats,
-                filters=filters.UpdateType.MESSAGE & filters.User(user_id=admin_ids),
-            )
-        )
+        admin_filter = filters.UpdateType.MESSAGE & filters.User(user_id=admin_ids)
+        app.add_handler(CommandHandler("stats", cmd_stats, filters=admin_filter))
+        app.add_handler(CommandHandler("export", cmd_export, filters=admin_filter))
     app.add_handler(
         MessageHandler(
             filters.LOCATION & filters.UpdateType.MESSAGE, _guarded(on_location, rate_limited=True)
