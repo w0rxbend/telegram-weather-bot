@@ -14,15 +14,18 @@ import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from html import escape
 from pathlib import Path
 from typing import Any
 
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 
-from weather_bot import health, telemetry
+from weather_bot import alerts, health, runtime, telemetry
 from weather_bot import locations as store
 from weather_bot import schedule as sched
+from weather_bot.cache import cached_forecast
+from weather_bot.i18n import resolve_lang, tr
 from weather_bot.locations import UserData
 from weather_bot.runtime import App
 from weather_bot.weather import WeatherError
@@ -47,6 +50,12 @@ async def scheduler_loop(
             raise
         except Exception:
             log.exception("Scheduler tick failed")
+        try:
+            await alert_tick(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Rain alert tick failed")
         if heartbeat is not None:
             health.beat(heartbeat)
         await asyncio.sleep(interval)
@@ -79,6 +88,58 @@ async def tick(app: App, now: datetime | None = None) -> int:
     return sent
 
 
+async def alert_tick(app: App, now: datetime | None = None) -> int:
+    """Warn opted-in users about rain in the next hours; returns the number of alerts sent."""
+    timestamp = (now or datetime.now(UTC)).timestamp()
+    sent = 0
+    for user_id, data in list(app.user_data.items()):
+        chat_id = alerts.chat_id_for(data)
+        if chat_id is None or not alerts.check_due(data, timestamp):
+            continue
+        try:
+            sent += await _alert_user(app, user_id, chat_id, data, timestamp)
+        except Exception:
+            log.exception("Rain alert for user %s failed", user_id)
+    return sent
+
+
+async def _alert_user(app: App, user_id: int, chat_id: int, data: UserData, now: float) -> int:
+    default = store.get_default(data)
+    if default is None:
+        return 0
+    try:
+        forecast = await cached_forecast(
+            runtime.http(),
+            default.place.latitude,
+            default.place.longitude,
+            data.get("units", "metric"),
+        )
+    except WeatherError as exc:
+        log.warning("Rain alert check for user %s skipped: %s", user_id, exc)
+        return 0
+    warning = alerts.rain_ahead(forecast)
+    if warning is None:
+        return 0
+    alerts.mark_sent(data, now)  # mark first: never repeat an alert after a crash
+    await _persist(app, [user_id])
+    lang = resolve_lang(data, data.get("lang_code"))
+    text = tr(
+        lang,
+        "rain_alert",
+        time=warning.time.strftime("%H:%M"),
+        place=escape(default.label),
+        probability=warning.probability,
+    )
+    try:
+        await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+    except Forbidden:
+        log.info("User %s blocked the bot; rain alerts removed", user_id)
+        alerts.disable(data)
+        await _persist(app, [user_id])
+        return 0
+    return 1
+
+
 async def _persist(app: App, user_ids: list[int]) -> None:
     app.mark_data_for_update_persistence(user_ids=user_ids)
     await app.update_persistence()
@@ -108,7 +169,7 @@ async def _send(app: App, user_id: int, data: UserData) -> None:
             app,
             chat_id=schedule.chat_id,
             photo=png,
-            caption=_caption(place, forecast, "weather"),
+            caption=_caption(place, forecast, "weather", resolve_lang(data, data.get("lang_code"))),
             parse_mode=ParseMode.HTML,
             reply_markup=_keyboard(place, units, "weather"),
         )
