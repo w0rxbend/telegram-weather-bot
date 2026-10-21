@@ -31,6 +31,10 @@ def build_application(settings: Settings, store: SqlitePersistence) -> App:
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
+    async def shutdown(app: App) -> None:
+        await post_shutdown(app)
+        store.close()  # PTB has flushed by now; closing lets SQLite checkpoint the WAL cleanly
+
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list[asyncio.Task[None]] = []
 
@@ -49,7 +53,7 @@ def build_application(settings: Settings, store: SqlitePersistence) -> App:
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)
-        .post_shutdown(post_shutdown)
+        .post_shutdown(shutdown)
         .build()
     )
     register_handlers(application)
