@@ -8,7 +8,7 @@ import pytest
 from weather_bot import bot, runtime
 from weather_bot import locations as store
 from weather_bot.geocode import Place
-from weather_bot.weather import Forecast
+from weather_bot.weather import Forecast, WeatherError
 
 KYIV = Place(name="Kyiv, Ukraine", latitude=50.45, longitude=30.52)
 LVIV = Place(name="Lviv, Ukraine", latitude=49.84, longitude=24.03)
@@ -116,6 +116,17 @@ async def test_weather_uses_default_and_slot_argument(forecast: Forecast) -> Non
         ctx.args = ["7"]
         await bot.cmd_weather(update, ctx)
     assert "No saved location matches" in update.effective_message.reply_text.await_args.args[0]
+
+
+async def test_unknown_slot_reply_does_not_echo_unbounded_text() -> None:
+    ctx = make_context(args=["x" * 4000])
+    store.add_location(ctx.user_data, KYIV)
+    update = make_update()
+    await bot.cmd_weather(update, ctx)
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "No saved location matches" in reply
+    assert len(reply) < 200  # Telegram rejects messages over 4096 characters
+    assert "…" in reply
 
 
 async def test_location_message_adds_slot_and_replies(forecast: Forecast) -> None:
@@ -230,6 +241,18 @@ async def test_refresh_callback_edits_media(forecast: Forecast) -> None:
     query.edit_message_media.assert_awaited_once()
     media = query.edit_message_media.await_args.kwargs["media"]
     assert "Kyiv, Ukraine" in media.caption
+
+
+async def test_refresh_failure_answers_the_query_once_and_replies_in_chat() -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, KYIV)
+    query = make_query("r|50.4500|30.5200")
+    with patch.object(bot, "cached_forecast", AsyncMock(side_effect=WeatherError("down"))):
+        await bot.on_card_callback(SimpleNamespace(callback_query=query), ctx)
+    query.answer.assert_awaited_once()  # a second answer is rejected by Telegram
+    query.message.reply_text.assert_awaited_once()
+    assert "unavailable" in query.message.reply_text.await_args.args[0]
+    query.edit_message_media.assert_not_awaited()
 
 
 async def test_units_callback_toggles_units(forecast: Forecast) -> None:

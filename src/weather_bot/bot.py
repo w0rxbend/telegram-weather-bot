@@ -77,6 +77,7 @@ KEY_UNITS = "units"
 KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
 KEY_PLACES = "places"
 MAX_CACHED_PLACES = 5000
+MAX_QUERY_LENGTH = 80  # longest city name we search for or echo back
 
 MAX_LATITUDE = 90.0
 MAX_LONGITUDE = 180.0
@@ -389,8 +390,9 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
     query = _args(context)
     loc = store.resolve(_user_data(context), query)
     if loc is None:
+        shown = query if len(query) <= MAX_QUERY_LENGTH else query[: MAX_QUERY_LENGTH - 1] + "…"
         await message.reply_text(
-            f"No saved location matches “{query}”. Send /locations to see your slots."
+            f"No saved location matches “{shown}”. Send /locations to see your slots."
         )
         return
     await _send_card(message, context, _card_place(loc), kind=kind)
@@ -637,7 +639,7 @@ async def on_text(update: Update, context: Context) -> None:
     if _user_data(context).get(sched.KEY_AWAITING_TIMES):
         await _on_custom_times(message, context, query)
         return
-    if len(query) < 2 or len(query) > 80:
+    if len(query) < 2 or len(query) > MAX_QUERY_LENGTH:
         await message.reply_text("Please send a city name, or share your location with /add.")
         return
 
@@ -705,9 +707,9 @@ async def on_card_callback(update: Update, context: Context) -> None:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
         log.warning("Refresh failed for %s: %s", place.name, exc)
-        await query.answer(
-            "Weather service is unavailable right now, try again shortly.", show_alert=True
-        )
+        # The query was answered above and Telegram rejects a second answer, so tell the
+        # user in the chat instead.
+        await message.reply_text("Weather service is unavailable right now, try again shortly.")
         return
 
     try:
