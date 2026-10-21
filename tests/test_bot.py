@@ -441,3 +441,11 @@ def test_inaccessible_button_message_counts_as_expired() -> None:
     assert datetime.fromtimestamp(0, UTC) == gone.date
     assert bot._query_message(SimpleNamespace(message=gone)) is None
     assert bot._query_message(SimpleNamespace(message=None)) is None
+
+
+def test_help_privacy_text_says_what_is_kept_and_for_how_long() -> None:
+    # Only the raw log expires; counters, cities and username stay until /forget (F-36).
+    for lang, log_phrase in (("en", "detailed usage log"), ("uk", "Детальний журнал")):
+        text = bot.HELP[lang]
+        assert log_phrase in text and "90" in text and "/forget" in text
+    assert "totals" in bot.HELP["en"] and "username" in bot.HELP["en"]

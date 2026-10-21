@@ -130,7 +130,8 @@ HELP_EN = (
     "Typing any city name shows its weather without saving it.\n\n"
     "<i>Privacy: the bot counts your commands and the cities you request, together with your "
     "Telegram id and username, to see how it is used. It never stores message text. "
-    "Usage logs are kept for 90 days. /forget erases everything stored about you.</i>"
+    "The detailed usage log is deleted after 90 days; the running totals (counts, cities, "
+    "username) stay until /forget erases everything stored about you.</i>"
 )
 
 
@@ -152,7 +153,8 @@ HELP_UK = (
     "Назва міста в чаті покаже погоду без збереження.\n\n"
     "<i>Приватність: бот рахує команди та міста запитів разом із вашим Telegram id та "
     "юзернеймом, щоб бачити, як ним користуються. Текст повідомлень не зберігається. "
-    "Логи зберігаються 90 днів. /forget видаляє все, що збережено про вас.</i>"
+    "Детальний журнал використання видаляється через 90 днів; підсумкові лічильники (дії, "
+    "міста, юзернейм) зберігаються, доки /forget не видалить усе, що збережено про вас.</i>"
 )
 HELP = {"en": HELP_EN, "uk": HELP_UK}
 
@@ -1031,5 +1033,5 @@ def register_handlers(app: App) -> None:
             _guarded(extra.on_lang_callback), pattern=rf"^{extra.CB_LANG}\|(en|uk)$"
         )
     )
-    app.add_handler(InlineQueryHandler(_guarded(extra.on_inline_query, rate_limited=True)))
+    app.add_handler(InlineQueryHandler(_guarded(extra.on_inline_query)))  # own limiter inside
     app.add_error_handler(on_error)

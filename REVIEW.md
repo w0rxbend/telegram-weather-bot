@@ -50,6 +50,9 @@
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
 | F-25 | Low | `bot.py` `_remember_place` | Shared `bot_data["places"]` can be primed by any user (stale label only) | — | **Deferred** | — |
 | F-34 | Low | `telemetry.py` `event_log` (:97-99, `_record`) | The raw event log (user id, username, event, city) grows without bound and is never pruned; `/export` caps only what is read. Disk growth and open-ended retention of identifiers | Raw rows older than `LOG_RETENTION_DAYS` (90) are deleted, at most once a day; aggregates stay. `/forget` erases a user's rows | Fixed (90 days is my choice; change the constant) | see git log |
+| F-35 | Medium | `bot.py` `register_handlers`, `handlers_extra.on_inline_query` | Inline queries drew on the 10/min card limiter (typing one search could lock the user out of `/weather`), got no answer once limited, and every query made an uncached geocode call | Own limiter (20/min), minimum 3 characters, `geocode.search_place_cached` (hits only, 1 h, 512 entries, also used by `/compare`), empty answers are not cached by the client | Fixed | see git log |
+| F-36 | Medium | `bot.py` HELP (en, uk), `telemetry.py` | `/help` said "Usage logs are kept for 90 days", but only `event_log` expires; `users` (username), `events` and `cities` (per-user city history) stay until `/forget` | The text now says what expires and what does not. **Expiry of the per-user totals is deferred:** `/stats` sums "cards" and the top cities from `cities`, so deleting old rows would change those numbers; moving rows older than 90 days to `user_id = 0` would keep the totals and drop the link to the person | Text fixed; expiry **Deferred** (owner decision) | see git log |
+| F-37 | Low | `planner.split_places` | `/compare Paris, France vs London` compared three "places": it split on commas even when "vs" was used, against its own usage text | "vs", "\|" and ";" are explicit separators; commas split only when none is present | Fixed | see git log |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -162,3 +165,14 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - No new findings; no code changed. F-22, F-23, F-25 and F-34 stay deferred (product/legal decisions, see above).
 - Not run: Docker build/Trivy, GitHub Actions, Telegram.
 - Branch is `claude/dazzling-heisenberg-1kiu1i` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Follow-up to PR #57 (2026-10-21)
+- #57 merged three minutes after it was opened, so this review ran on code already in `main`. Its CI, ruff, mypy and bandit were clean;
+  I read the new modules and probed them. Findings F-35 to F-37 are fixed here.
+- Found but not fixed here: chat text is only partly localised (54 reply sites in `bot.py` are still English: `/units`, `/default`,
+  `/remove`, `/rename`, `/schedule`, `/add`, errors, `/forget`), and a rain alert to a chat that no longer exists (`BadRequest: chat not found`)
+  is not handled the way scheduled cards are (one logged error per 6 h per such user). The "windy" tip fires at gusts of 30 km/h, which may be
+  often; it has not been measured.
+- Baseline on `main` (1d7e890): `pytest -q` 287 passed. Final: 304 passed (17 new) on Python 3.11.17, 3.13.16 and 3.14.6; ruff, ruff format,
+  mypy strict (36 files), bandit clean. Each new test fails without its fix (mutation-checked, including the geocode cache's four rules).
+- Not run: Docker, GitHub Actions, live Telegram or Open-Meteo. How often a real client sends inline queries while typing is assumed, not measured.

@@ -5,16 +5,25 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from telegram.constants import ChatType
+from telegram.ext import ApplicationBuilder, InlineQueryHandler
 
 from forecast_helpers import set_hour, with_hours
-from weather_bot import alerts, handlers_extra
+from weather_bot import alerts, bot, handlers_extra
 from weather_bot import locations as store
 from weather_bot.airquality import AirQuality
 from weather_bot.geocode import Place
+from weather_bot.ratelimit import RateLimiter
 from weather_bot.weather import Forecast, WeatherError
 
 KYIV = Place("Kyiv, Ukraine", 50.45, 30.52)
 LVIV = Place("Lviv, Ukraine", 49.84, 24.03)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_inline_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        handlers_extra, "_inline_limiter", RateLimiter(limit=handlers_extra.INLINE_LIMIT_PER_MINUTE)
+    )
 
 
 def make_update(chat_type: str = ChatType.PRIVATE, code: str = "en", data: str | None = None):
@@ -97,7 +106,7 @@ async def test_compare_lists_each_city_and_reports_the_unknown_one(forecast: For
     search = AsyncMock(side_effect=lambda client, name, lang: places.get(name))
     update, context = make_update(), make_context(["Kyiv,", "Lviv,", "Nowhere"])
     with (
-        patch.object(handlers_extra, "search_place", search),
+        patch.object(handlers_extra, "search_place_cached", search),
         patch.object(handlers_extra, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(handlers_extra, "_client", lambda context: object()),
     ):
@@ -107,13 +116,29 @@ async def test_compare_lists_each_city_and_reports_the_unknown_one(forecast: For
     assert "find “Nowhere”" in text
 
 
+async def test_compare_keeps_commas_inside_names_when_vs_separates_them(
+    forecast: Forecast,
+) -> None:
+    places = {"Paris, France": KYIV, "London": LVIV}
+    search = AsyncMock(side_effect=lambda client, name, lang: places.get(name))
+    update, context = make_update(), make_context(["Paris,", "France", "vs", "London"])
+    with (
+        patch.object(handlers_extra, "search_place_cached", search),
+        patch.object(handlers_extra, "cached_forecast", AsyncMock(return_value=forecast)),
+        patch.object(handlers_extra, "_client", lambda context: object()),
+    ):
+        await handlers_extra.cmd_compare(update, context)
+    assert [call.args[1] for call in search.await_args_list] == ["Paris, France", "London"]
+
+
 @pytest.mark.parametrize("args", [[], ["Kyiv"], ["a,", "b,", "c,", "d"], ["Kyiv,", "x"]])
 async def test_compare_rejects_bad_input_without_network(args: list[str]) -> None:
     update = make_update()
-    with patch.object(handlers_extra, "search_place", AsyncMock()) as search:
+    with patch.object(handlers_extra, "search_place_cached", AsyncMock()) as search:
         await handlers_extra.cmd_compare(update, make_context(args))
     search.assert_not_awaited()
     assert "Usage: /compare" in reply_text(update)
+    assert "comma" in reply_text(update) and "vs" in reply_text(update)
 
 
 async def test_best_answers_in_the_users_language(forecast: Forecast) -> None:
@@ -157,7 +182,7 @@ def inline_update(text: str):
 async def test_inline_query_offers_one_result(forecast: Forecast) -> None:
     update = inline_update("Kyiv")
     with (
-        patch.object(handlers_extra, "search_place", AsyncMock(return_value=KYIV)),
+        patch.object(handlers_extra, "search_place_cached", AsyncMock(return_value=KYIV)),
         patch.object(handlers_extra, "cached_forecast", AsyncMock(return_value=forecast)),
         patch.object(handlers_extra, "_client", lambda context: object()),
     ):
@@ -167,20 +192,69 @@ async def test_inline_query_offers_one_result(forecast: Forecast) -> None:
     assert update.inline_query.answer.await_args.kwargs["is_personal"] is True
 
 
-@pytest.mark.parametrize("text", ["", "k", "x" * 200])
+@pytest.mark.parametrize("text", ["", "k", "ky", "x" * 200])  # under 3 characters: no lookup
 async def test_inline_query_with_bad_text_answers_empty_without_network(text: str) -> None:
     update = inline_update(text)
-    with patch.object(handlers_extra, "search_place", AsyncMock()) as search:
+    with patch.object(handlers_extra, "search_place_cached", AsyncMock()) as search:
         await handlers_extra.on_inline_query(update, make_context())
     search.assert_not_awaited()
     assert update.inline_query.answer.await_args.args[0] == []
+    assert update.inline_query.answer.await_args.kwargs["cache_time"] == 0  # not remembered
 
 
 async def test_inline_query_unknown_city_answers_empty() -> None:
     update = inline_update("Nowhere")
     with (
-        patch.object(handlers_extra, "search_place", AsyncMock(return_value=None)),
+        patch.object(handlers_extra, "search_place_cached", AsyncMock(return_value=None)),
         patch.object(handlers_extra, "_client", lambda context: object()),
     ):
         await handlers_extra.on_inline_query(update, make_context())
     assert update.inline_query.answer.await_args.args[0] == []
+    assert update.inline_query.answer.await_args.kwargs["cache_time"] == 0  # not remembered
+
+
+async def test_inline_query_is_throttled_with_an_empty_uncached_answer(
+    forecast: Forecast, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(handlers_extra, "_inline_limiter", RateLimiter(limit=2))
+    search = AsyncMock(return_value=KYIV)
+    calls = []
+    with (
+        patch.object(handlers_extra, "search_place_cached", search),
+        patch.object(handlers_extra, "cached_forecast", AsyncMock(return_value=forecast)),
+        patch.object(handlers_extra, "_client", lambda context: object()),
+    ):
+        for _ in range(3):
+            update = inline_update("Kyiv")
+            await handlers_extra.on_inline_query(update, make_context())
+            calls.append(update.inline_query.answer.await_args)
+    assert [len(call.args[0]) for call in calls] == [1, 1, 0]
+    assert [call.kwargs["cache_time"] for call in calls] == [
+        handlers_extra.INLINE_CACHE_SECONDS
+    ] * 2 + [0]
+    assert search.await_count == 2  # the throttled query never reached the network
+
+
+async def test_inline_mode_does_not_use_up_the_card_rate_limit(
+    forecast: Forecast, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = ApplicationBuilder().token("123456:TEST-TOKEN-NOT-REAL").build()
+    bot.register_handlers(app)
+    handler = next(
+        h
+        for handlers in app.handlers.values()
+        for h in handlers
+        if isinstance(h, InlineQueryHandler)
+    )
+    card_limiter = RateLimiter(limit=1)
+    assert card_limiter.allow(7)  # this user's card budget is already spent
+    monkeypatch.setattr(bot, "_card_limiter", card_limiter)
+    update = inline_update("Kyiv")
+    with (
+        patch.object(handlers_extra, "search_place_cached", AsyncMock(return_value=KYIV)),
+        patch.object(handlers_extra, "cached_forecast", AsyncMock(return_value=forecast)),
+        patch.object(handlers_extra, "_client", lambda context: object()),
+    ):
+        await handler.callback(update, make_context())
+    update.inline_query.answer.assert_awaited_once()
+    assert len(update.inline_query.answer.await_args.args[0]) == 1
