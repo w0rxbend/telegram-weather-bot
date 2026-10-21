@@ -150,3 +150,29 @@ async def test_export_is_admin_only(usage: UsageTelemetry) -> None:
     admin = _stats_update(7)
     await bot.cmd_export(admin, SimpleNamespace())  # type: ignore[arg-type]
     admin.effective_message.reply_document.assert_called_once()
+
+
+async def test_old_log_rows_are_pruned_but_aggregates_kept(
+    usage: UsageTelemetry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = 1_000_000_000
+    old = now - (telemetry.LOG_RETENTION_DAYS + 1) * telemetry.SECONDS_PER_DAY
+    monkeypatch.setattr("weather_bot.telemetry.time.time", lambda: old)
+    await usage.record_event(1, "cmd_weather", "ann")
+    monkeypatch.setattr("weather_bot.telemetry.time.time", lambda: now)
+    await usage.record_event(1, "cmd_sun")
+    rows = list(csv.reader(io.StringIO(await usage.export_csv())))
+    assert [row[3] for row in rows[1:]] == ["cmd_sun"]
+    report = await usage.report()
+    assert report.events == 2  # lifetime counters survive the pruning
+
+
+async def test_forget_user_erases_every_table(usage: UsageTelemetry) -> None:
+    await usage.record_event(1, "cmd_weather", "ann")
+    with telemetry.acting_as(1):
+        await usage.record_card("Kyiv, Ukraine", "weather")
+    await usage.record_event(2, "cmd_sun", "bob")
+    await usage.forget_user(1)
+    report = await usage.report()
+    assert (report.users, report.events, report.cards) == (1, 1, 0)
+    assert "ann" not in await usage.export_csv()

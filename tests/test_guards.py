@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -138,3 +138,33 @@ async def test_guarded_same_user_never_overlaps() -> None:
     guarded = bot._guarded(handler)
     await asyncio.gather(*(guarded(_update(7), SimpleNamespace()) for _ in range(5)))
     assert violations == 0
+
+
+async def test_forget_erases_user_data_and_telemetry() -> None:
+    user_gone = MagicMock()
+    usage = AsyncMock()
+    runtime.set_telemetry(usage)
+    try:
+        message = SimpleNamespace(edit_text=AsyncMock())
+        query = SimpleNamespace(data="forget|yes", answer=AsyncMock(), message=message)
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
+        context = SimpleNamespace(
+            application=SimpleNamespace(drop_user_data=user_gone), user_data={}
+        )
+        await bot.on_forget_callback(update, context)
+    finally:
+        runtime.set_telemetry(None)
+    user_gone.assert_called_once_with(7)
+    usage.forget_user.assert_awaited_once_with(7)
+    message.edit_text.assert_awaited_once_with(bot.FORGET_DONE)
+
+
+async def test_forget_cancel_keeps_everything() -> None:
+    drop = MagicMock()
+    message = SimpleNamespace(edit_text=AsyncMock())
+    query = SimpleNamespace(data="forget|no", answer=AsyncMock(), message=message)
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
+    context = SimpleNamespace(application=SimpleNamespace(drop_user_data=drop), user_data={})
+    await bot.on_forget_callback(update, context)
+    drop.assert_not_called()
+    query.answer.assert_awaited_once()

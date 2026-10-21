@@ -41,6 +41,7 @@ COMMANDS = [
     BotCommand("default", "Make a slot the default: /default 2"),
     BotCommand("remove", "Delete a slot: /remove 2"),
     BotCommand("units", "Switch °C / °F"),
+    BotCommand("forget", "Erase everything stored about you"),
     BotCommand("help", "All commands"),
 ]
 

@@ -44,6 +44,7 @@ Everything is drawn with Pillow; no browser, no image assets, no API keys.
 | `/default N` · `/rename N name` · `/remove N` | Manage slots by number |
 | `/schedule` | Menu of notification presets; `/schedule 7:30 18:00` sets custom times, `/schedule off` stops |
 | `/units` | Toggle °C / km/h ↔ °F / mph (also a button under each card) |
+| `/forget` | Erase everything stored about you (asks to confirm) |
 | `/help` | Command list |
 | *any text* | One-off card for that city; your slots stay unchanged |
 
