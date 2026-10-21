@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from weather_bot.httpcap import get_capped
 from weather_bot.privacy import describe_error
 
 log = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ async def reverse_geocode(
     }
     headers = {"Accept-Language": language or "en"}
     try:
-        response = await client.get(NOMINATIM_REVERSE_URL, params=params, headers=headers)
+        response = await get_capped(client, NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
@@ -83,7 +84,7 @@ async def search_place(
         "format": "json",
     }
     try:
-        response = await client.get(OPEN_METEO_GEOCODE_URL, params=params)
+        response = await get_capped(client, OPEN_METEO_GEOCODE_URL, params=params)
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
