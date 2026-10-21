@@ -8,12 +8,13 @@ import logging
 import httpx
 from telegram.ext import AIORateLimiter, ApplicationBuilder
 
-from weather_bot import scheduler
+from weather_bot import runtime, scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
 from weather_bot.config import Settings, load_settings
 from weather_bot.legacy_state import import_pickle_state, quarantine_corrupt_state
 from weather_bot.persistence import SqlitePersistence
 from weather_bot.runtime import App
+from weather_bot.telemetry import UsageTelemetry
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 MAX_API_RETRIES = 3  # Bot API 429s the rate limiter retries before the error reaches a handler
@@ -33,7 +34,11 @@ def build_application(settings: Settings, store: SqlitePersistence) -> App:
 
     async def shutdown(app: App) -> None:
         await post_shutdown(app)
-        store.close()  # PTB has flushed by now; closing lets SQLite checkpoint the WAL cleanly
+        # PTB has flushed by now; closing lets SQLite checkpoint each WAL cleanly
+        store.close()
+        if (usage := runtime.telemetry()) is not None:
+            usage.close()
+            runtime.set_telemetry(None)
 
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list[asyncio.Task[None]] = []
@@ -66,6 +71,8 @@ def start() -> None:
 
     settings = load_settings()
     store = SqlitePersistence(settings.persistence_file)
+    runtime.set_telemetry(UsageTelemetry(settings.telemetry_file))
+    runtime.set_admin_ids(settings.admin_ids)
     quarantine_corrupt_state(settings.legacy_pickle_file)
     import_pickle_state(settings.legacy_pickle_file, store)
 

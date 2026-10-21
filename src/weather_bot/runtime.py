@@ -12,6 +12,7 @@ import httpx
 from telegram.ext import Application
 
 from weather_bot.ratelimit import MinIntervalGate
+from weather_bot.telemetry import UsageTelemetry
 
 App = Application[Any, Any, Any, Any, Any, Any]  # PTB application with default context types
 
@@ -38,3 +39,30 @@ def nominatim_gate() -> MinIntervalGate:
     if _nominatim_gate is None:
         _nominatim_gate = MinIntervalGate(NOMINATIM_INTERVAL)
     return _nominatim_gate
+
+
+_telemetry: UsageTelemetry | None = None
+_admin_ids: frozenset[int] = frozenset()
+
+
+def set_telemetry(telemetry: UsageTelemetry | None) -> None:
+    global _telemetry
+    _telemetry = telemetry
+
+
+def telemetry() -> UsageTelemetry | None:
+    """The usage recorder, or ``None`` when telemetry is not configured (e.g. in tests)."""
+    return _telemetry
+
+
+def set_admin_ids(ids: frozenset[int]) -> None:
+    global _admin_ids
+    _admin_ids = ids
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in _admin_ids
+
+
+def admin_ids() -> frozenset[int]:
+    return _admin_ids

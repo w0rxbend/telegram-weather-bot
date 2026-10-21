@@ -45,7 +45,7 @@
 | F-31 | Medium | `bot.py` `on_card_callback` | A failed refresh answered the callback query twice; Telegram rejects the second answer, so the user saw the generic error | Notice is a chat reply | Fixed | see git log |
 | F-32 | Low | `bot.py` `/weather <text>` | Whole argument echoed back; with the prefix it can pass Telegram's 4096 limit | Echo capped at `MAX_QUERY_LENGTH` (80) | Fixed | see git log |
 | F-33 | Low | `scheduler.py` `tick` | "Already sent" marks were saved only after sending; a crash mid-tick resent delivered cards | Save before sending and again after | Fixed | see git log |
-| F-34 | Low | `main.py` | `SqlitePersistence.close()` was never called, so the WAL is left for the next start to recover | `post_shutdown` wrapper closes the store after PTB's final flush | Fixed | see git log |
+| F-34 | Low | `main.py` | `SqlitePersistence.close()` and `UsageTelemetry.close()` were never called, so each WAL is left for the next start to recover | `post_shutdown` wrapper closes both after PTB's final flush | Fixed | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -89,6 +89,10 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 
 - F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
 
+## Follow-up pass (2026-10-21, telemetry)
+- Baseline re-run on `main` (584a81d): `pytest -q` 203 passed; ruff check/format, `mypy` (28 files), bandit clean. No new findings.
+- Feature requested by the owner: custom usage telemetry (`telemetry.py`, `/stats`, `ADMIN_USER_IDS`). 209 tests pass; ruff, mypy, bandit clean.
+- Privacy note: this stores Telegram ids/usernames. Users are told in `/help`; coordinates, message text and chat ids are not stored. Check this against your privacy obligations (GDPR) before enabling for the public.
 
 ## Consolidation pass (2026-10-21)
 Goal: merge or retire every open PR and unmerged branch, and port only what `main` was still missing.
@@ -116,7 +120,7 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
 | `dependabot/*` | #43-#48 | Merged |
 | `claude/dazzling-heisenberg-imfi0p` (= `chore/review-hardening-2026-10-21`, tip d520250) | #50 | Opened by another session while this pass ran. Superseded: its CI matrix is covered by F-28, its store-close fix is F-34 |
 | `claude/dazzling-heisenberg-h46q9s` (tip 6388665) | #51 | Same. Its idea of testing 3.11 is in the F-28 matrix |
-| `claude/dazzling-heisenberg-5o3sjy` | #52 | Not touched: new telemetry feature (per-user usage and city statistics, admin `/stats`) still under development in another session. Needs its own review, in particular against F-02 (no personal data in logs) |
+| `claude/dazzling-heisenberg-5o3sjy` | #52 | Merged by the owner (95e338a) while this pass ran: usage telemetry and admin `/stats`, requested by the owner (see the telemetry pass above for its privacy note). Not reviewed here, except that its SQLite connection is now closed at shutdown too (F-34) |
 
 Closed PRs keep their commits reachable through `refs/pull/<n>/head` after the branches are deleted; the one branch without
 a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while GitHub still holds the object.
