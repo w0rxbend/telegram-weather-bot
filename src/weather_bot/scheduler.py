@@ -55,24 +55,33 @@ async def scheduler_loop(
 async def tick(app: App, now: datetime | None = None) -> int:
     """Send everything that is due; returns the number of cards sent."""
     now = now or datetime.now(UTC)
-    sent = 0
-    touched: list[int] = []
+    due_users: list[tuple[int, UserData]] = []
     for user_id, data in list(app.user_data.items()):
         due = sched.due_times(data, now)
         if not due:
             continue
-        touched.append(user_id)
         for slot in due:
             sched.mark_sent(data, now, slot)  # mark first: never retry-storm a failing send
+        due_users.append((user_id, data))
+    if not due_users:
+        return 0
+
+    touched = [user_id for user_id, _ in due_users]
+    await _persist(app, touched)  # a crash while sending must not resend after the restart
+    sent = 0
+    for user_id, data in due_users:
         try:
             await _send(app, user_id, data)
             sent += 1
         except Exception:
             log.exception("Scheduled send for user %s failed", user_id)
-    if touched:
-        app.mark_data_for_update_persistence(user_ids=touched)
-        await app.update_persistence()
+    await _persist(app, touched)  # _send may have cleared a schedule or learned a time zone
     return sent
+
+
+async def _persist(app: App, user_ids: list[int]) -> None:
+    app.mark_data_for_update_persistence(user_ids=user_ids)
+    await app.update_persistence()
 
 
 async def _send(app: App, user_id: int, data: UserData) -> None:
