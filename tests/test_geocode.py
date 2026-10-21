@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from weather_bot.geocode import reverse_geocode, search_place
+from weather_bot.httpcap import MAX_RESPONSE_BYTES
 from weather_bot.ratelimit import MinIntervalGate
 
 
@@ -87,3 +90,26 @@ async def test_reverse_geocode_spaces_requests_through_the_gate() -> None:
         await reverse_geocode(client, 50.45, 30.52, gate=gate)
         await reverse_geocode(client, 49.84, 24.03, gate=gate)
     assert events == ["request", "sleep 1.0", "request"]
+
+
+async def test_oversized_reverse_geocode_response_falls_back_to_coordinates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        city = b"x" * MAX_RESPONSE_BYTES
+        return httpx.Response(200, content=b'{"address": {"city": "' + city + b'"}}')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        place = await reverse_geocode(client, 12.3456, -7.891)
+    assert place.name == "12.346, -7.891"
+
+
+async def test_oversized_search_response_counts_as_not_found() -> None:
+    hit = {
+        "results": [{"name": "Lviv", "country": "Ukraine", "latitude": 49.84, "longitude": 24.03}]
+    }
+    padding = b" " * (MAX_RESPONSE_BYTES + 1)  # keeps the JSON valid: only the size cap rejects it
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(hit).encode() + padding)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await search_place(client, "Kyiv") is None
