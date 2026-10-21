@@ -7,7 +7,8 @@
 - **After:** 193 tests green, ruff/format/mypy `--strict`/bandit/pip-audit all clean; CI now runs all
   of them. PII is out of logs, state writes are atomic (0600), per-user locking and rate limiting
   are in place, config is validated at startup, container is read-only with a healthcheck.
-- **Top remaining risks:** the SQLite state store (F-20) and the new SHA pins/Trivy step have not run against production or Actions yet.
+- **Top remaining risks:** the SQLite state store (F-20) has not run against production. It has not shipped yet: the Trivy gate was red from #49 on (F-27), so
+  the first deploy after F-27 is the F-20 migration; back up the data volume first (see Deferred).
 - No secrets were found in the working tree or git history (regex scan for bot-token shapes and
   `*_KEY=`/`*_TOKEN=` literals). No rotation needed.
 
@@ -37,6 +38,13 @@
 | F-20 | Medium | `persistence.py` / pickle | Pickle state: rewrites all users on flush, unsafe if tampered with, no migration | `SqlitePersistence` (JSON rows, WAL, 0600) + one-off pickle import (`legacy_state.py`); see `docs/decisions/0001-state-storage.md` | Fixed (import untested on real data) | see git log |
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
+| F-27 | Medium | `Dockerfile`, `docker-ci.yml` | The Trivy gate (F-19) failed on every push to main: its five HIGH/CRITICAL hits are the copies vendored inside pip 26.2.1 (certifi 2026.6.17, msgpack 1.1.2, setuptools 70.3.0, urllib3 2.7.0), not our lock. A red gate blocks the image push **and the deploy**, so nothing merged since #49 has shipped | `pip uninstall -y pip` in the runtime stage after the requirements are installed | Fixed (checked in a venv; not run in Actions) | see git log |
+| F-28 | Medium | `docker-ci.yml`, `ci.yml` | Deploy ran on any push to main without running the tests; CI tested 3.13 while the image runs 3.14 (#43) | `test` job that `build-and-deploy` needs (3.14); CI matrix 3.13 + 3.14 (suite and mypy pass on 3.14.6) | Fixed (not run in Actions) | see git log |
+| F-29 | Low | `geocode.py` | Nominatim's one-request-per-second policy was documented but not enforced | `ratelimit.MinIntervalGate` via `runtime.nominatim_gate()` | Fixed | see git log |
+| F-30 | Medium | `main.py` | No Bot API flood control: a 429 reached the handler or the scheduler | `AIORateLimiter(max_retries=3)` (extra `rate-limiter`, adds aiolimiter 1.2.1) | Fixed | see git log |
+| F-31 | Medium | `bot.py` `on_card_callback` | A failed refresh answered the callback query twice; Telegram rejects the second answer, so the user saw the generic error | Notice is a chat reply | Fixed | see git log |
+| F-32 | Low | `bot.py` `/weather <text>` | Whole argument echoed back; with the prefix it can pass Telegram's 4096 limit | Echo capped at `MAX_QUERY_LENGTH` (80) | Fixed | see git log |
+| F-33 | Low | `scheduler.py` `tick` | "Already sent" marks were saved only after sending; a crash mid-tick resent delivered cards | Save before sending and again after | Fixed | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
@@ -47,6 +55,7 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 ## Deferred — exact action required from you
 - **F-20 deploy check:** before the first deploy, back up the data volume; after it, confirm the log line `Imported N users` and that `bot_state.pickle.migrated` exists next to `bot_state.sqlite3`. Rollback: stop the bot, delete the `.sqlite3*` files, rename `.migrated` back to `.pickle`, deploy the previous image.
 - **F-22 / F-23:** product/capacity decisions; see `TODO.md`.
+- **F-27 / F-28:** after the merge, open the *Docker Image CI* run on `main` and confirm the Trivy step passes. Neither fix has run in Actions; if Trivy still fails, the log names the package.
 - **Deploy check:** after merge, run `docker compose up -d` and confirm `docker inspect --format '{{.State.Health.Status}}' <container>` becomes `healthy`, and that the bot starts with `read_only: true`.
 
 ## Facts (verified by running)
@@ -78,3 +87,32 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - Branch is `claude/dazzling-heisenberg-r7foh2` (environment-assigned), not `chore/review-hardening-<date>`.
 
 - F-18/F-19 done in the follow-up commits; F-20 decision recorded in `docs/decisions/0001-state-storage.md`. The Trivy step and pinned SHAs have not run in GitHub Actions yet.
+
+
+## Consolidation pass (2026-10-21)
+Goal: merge or retire every open PR and unmerged branch, and port only what `main` was still missing.
+
+- Merged #43-#48 (Dependabot: Python 3.14-slim, setup-buildx 4.4.1, setup-qemu 4.4.0, setup-python 7.0.0,
+  upload-artifact 7.0.2, build-push-action 7.4.0) after green CI.
+- Baseline on `main`: `pytest` 203 passed (3.13 and 3.14.6); ruff, format, mypy (28 files), bandit clean.
+  Final: 222 passed on 3.14.6; ruff, format, mypy (28 files), bandit clean; `pip-audit` on the exported lock: no known
+  vulnerabilities.
+- Method: run each branch's test suite against `main`'s source and read the commits, then port what is missing
+  (F-27 to F-33) instead of merging branches that carry competing versions of what #41 and #49 already contain.
+  New tests for F-31, F-32, F-33 and the oversize cap were confirmed to fail without the fix.
+- Not run: the Docker build and Trivy scan (no daemon here), GitHub Actions, Telegram.
+
+| Branch | PR | Disposition |
+|--------|----|-------------|
+| `claude/keen-clarke-jfbpll`, `claude/dazzling-heisenberg-r7foh2` | #41, #49 | Merged earlier |
+| `claude/determined-davinci-89m7p2`, `ci-updates`, `restyled/ci-updates` | - | Already contained in `main` |
+| `claude/keen-clarke-091j6t` (tip 201cea6) | #39 | Ported F-28, F-29, F-30, F-33 and the echo cap (F-32); rest superseded by #41/#49 |
+| `claude/keen-clarke-po5xv6` (tip 00ab173) | #40 | Ported F-31 and its routing/error-handler tests; rest superseded. Group-chat scoping of free text and `/schedule` is not ported (F-23, product decision); the implementation is in the closed PR |
+| `claude/dazzling-heisenberg-3xhgnc` (tip 6193db0) | #42 | Superseded; its cache-waiter and render-cap fixes were ported earlier (32da5b5) |
+| `claude/dazzling-heisenberg-um3y0i` (tip f6f0f47, no PR) | - | Superseded by `httpcap` (F-21, 1 MB); its call-site tests ported with valid padded payloads |
+| `snyk-fix-*`, `restyled/snyk-fix-*` | #18-#35 | Retired: they bump Python to 3.13 alpha/beta/rc tags; the image is on 3.14-slim |
+| `renovate/configure`, `restyled/renovate/configure` | - | Retired: 2023 Jitsi-bot era (root `main.py`) plus `renovate.json`; Dependabot is the dependency bot |
+| `dependabot/*` | #43-#48 | Merged |
+
+Closed PRs keep their commits reachable through `refs/pull/<n>/head` after the branches are deleted; the one branch without
+a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while GitHub still holds the object.
