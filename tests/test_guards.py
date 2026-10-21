@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -78,7 +78,9 @@ def _update(user_id: int = 1, *, callback: bool = False) -> SimpleNamespace:
     message = SimpleNamespace(reply_text=AsyncMock())
     query = SimpleNamespace(answer=AsyncMock()) if callback else None
     return SimpleNamespace(
-        effective_user=SimpleNamespace(id=user_id), effective_message=message, callback_query=query
+        effective_user=SimpleNamespace(id=user_id, language_code="en"),
+        effective_message=message,
+        callback_query=query,
     )
 
 
@@ -90,7 +92,7 @@ async def test_guarded_rate_limit_replies_instead_of_running(
     guarded = bot._guarded(handler, rate_limited=True)
     update = _update()
     for _ in range(3):
-        await guarded(update, SimpleNamespace())
+        await guarded(update, SimpleNamespace(user_data={}))
     assert handler.await_count == 2
     update.effective_message.reply_text.assert_awaited_once_with(bot.RATE_LIMITED_TEXT)
 
@@ -99,8 +101,8 @@ async def test_guarded_rate_limit_answers_callbacks(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(bot, "_card_limiter", RateLimiter(limit=1, window=60))
     guarded = bot._guarded(AsyncMock(), rate_limited=True)
     update = _update(callback=True)
-    await guarded(update, SimpleNamespace())
-    await guarded(update, SimpleNamespace())
+    await guarded(update, SimpleNamespace(user_data={}))
+    await guarded(update, SimpleNamespace(user_data={}))
     update.callback_query.answer.assert_awaited_once_with(bot.RATE_LIMITED_TEXT, show_alert=True)
 
 
@@ -116,7 +118,7 @@ async def test_guarded_serializes_updates_of_one_user_but_not_across_users() -> 
         running -= 1
 
     guarded = bot._guarded(slow)
-    ctx = SimpleNamespace()
+    ctx = SimpleNamespace(user_data={})
     await asyncio.gather(
         guarded(_update(1), ctx), guarded(_update(1), ctx), guarded(_update(2), ctx)
     )
@@ -136,5 +138,35 @@ async def test_guarded_same_user_never_overlaps() -> None:
         active -= 1
 
     guarded = bot._guarded(handler)
-    await asyncio.gather(*(guarded(_update(7), SimpleNamespace()) for _ in range(5)))
+    await asyncio.gather(*(guarded(_update(7), SimpleNamespace(user_data={})) for _ in range(5)))
     assert violations == 0
+
+
+async def test_forget_erases_user_data_and_telemetry() -> None:
+    user_gone = MagicMock()
+    usage = AsyncMock()
+    runtime.set_telemetry(usage)
+    try:
+        message = SimpleNamespace(edit_text=AsyncMock())
+        query = SimpleNamespace(data="forget|yes", answer=AsyncMock(), message=message)
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
+        context = SimpleNamespace(
+            application=SimpleNamespace(drop_user_data=user_gone), user_data={}
+        )
+        await bot.on_forget_callback(update, context)
+    finally:
+        runtime.set_telemetry(None)
+    user_gone.assert_called_once_with(7)
+    usage.forget_user.assert_awaited_once_with(7)
+    message.edit_text.assert_awaited_once_with(bot.FORGET_DONE)
+
+
+async def test_forget_cancel_keeps_everything() -> None:
+    drop = MagicMock()
+    message = SimpleNamespace(edit_text=AsyncMock())
+    query = SimpleNamespace(data="forget|no", answer=AsyncMock(), message=message)
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
+    context = SimpleNamespace(application=SimpleNamespace(drop_user_data=drop), user_data={})
+    await bot.on_forget_callback(update, context)
+    drop.assert_not_called()
+    query.answer.assert_awaited_once()

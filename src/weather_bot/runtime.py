@@ -33,14 +33,6 @@ def http() -> httpx.AsyncClient:
     return _http
 
 
-def nominatim_gate() -> MinIntervalGate:
-    """Shared gate for Nominatim; built on first use because its lock binds to the event loop."""
-    global _nominatim_gate
-    if _nominatim_gate is None:
-        _nominatim_gate = MinIntervalGate(NOMINATIM_INTERVAL)
-    return _nominatim_gate
-
-
 _telemetry: UsageTelemetry | None = None
 _admin_ids: frozenset[int] = frozenset()
 
@@ -66,3 +58,11 @@ def is_admin(user_id: int) -> bool:
 
 def admin_ids() -> frozenset[int]:
     return _admin_ids
+
+
+def nominatim_gate() -> MinIntervalGate:
+    """Shared gate for Nominatim; built on first use because its lock binds to the event loop."""
+    global _nominatim_gate
+    if _nominatim_gate is None:
+        _nominatim_gate = MinIntervalGate(NOMINATIM_INTERVAL)
+    return _nominatim_gate

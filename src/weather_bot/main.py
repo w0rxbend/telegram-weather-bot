@@ -34,11 +34,10 @@ def build_application(settings: Settings, store: SqlitePersistence) -> App:
 
     async def shutdown(app: App) -> None:
         await post_shutdown(app)
-        # PTB has flushed by now; closing lets SQLite checkpoint each WAL cleanly
         store.close()
-        if (usage := runtime.telemetry()) is not None:
-            usage.close()
-            runtime.set_telemetry(None)
+        telemetry = runtime.telemetry()
+        if telemetry is not None:
+            telemetry.close()
 
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list[asyncio.Task[None]] = []

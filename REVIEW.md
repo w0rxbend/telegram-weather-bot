@@ -39,17 +39,17 @@
 | F-21 | Low | `geocode.py`, `weather.py` | No response size limit on outbound calls | `httpcap.get_capped` (1 MB, streamed) | Fixed (2026-10-21) | b4c7090 |
 | F-26 | High | `poetry.lock` (certifi 2026.7.22) | PYSEC-2026-4320, new advisory since the last pass | `poetry update certifi` → 2026.10.19 | Fixed (2026-10-21) | 31752a3 |
 | F-27 | Medium | `Dockerfile`, `docker-ci.yml` | The Trivy gate (F-19) failed on every push to main: its five HIGH/CRITICAL hits are the copies vendored inside pip 26.2.1 (certifi 2026.6.17, msgpack 1.1.2, setuptools 70.3.0, urllib3 2.7.0), not our lock. A red gate blocks the image push **and the deploy**, so nothing merged since #49 has shipped | `pip uninstall -y pip` in the runtime stage after the requirements are installed | Fixed (checked in a venv; not run in Actions) | see git log |
-| F-28 | Medium | `docker-ci.yml`, `ci.yml` | Deploy ran on any push to main without running the tests; CI tested 3.13 while the image runs 3.14 (#43) | `test` job that `build-and-deploy` needs (3.14); CI matrix 3.11 (lowest supported) + 3.13 (dev container) + 3.14 (image); suite, ruff and mypy pass on 3.11.17, 3.13.16 and 3.14.6 | Fixed (not run in Actions) | see git log |
+| F-28 | Medium | `docker-ci.yml`, `ci.yml` | Deploy ran on any push to main without running the tests; CI tested 3.13 while the image runs 3.14 (#43) | `test` job that `build-and-deploy` needs (3.14); CI matrix 3.13 + 3.14 (suite and mypy pass on 3.14.6) | Fixed (not run in Actions) | see git log |
 | F-29 | Low | `geocode.py` | Nominatim's one-request-per-second policy was documented but not enforced | `ratelimit.MinIntervalGate` via `runtime.nominatim_gate()` | Fixed | see git log |
 | F-30 | Medium | `main.py` | No Bot API flood control: a 429 reached the handler or the scheduler | `AIORateLimiter(max_retries=3)` (extra `rate-limiter`, adds aiolimiter 1.2.1) | Fixed | see git log |
 | F-31 | Medium | `bot.py` `on_card_callback` | A failed refresh answered the callback query twice; Telegram rejects the second answer, so the user saw the generic error | Notice is a chat reply | Fixed | see git log |
 | F-32 | Low | `bot.py` `/weather <text>` | Whole argument echoed back; with the prefix it can pass Telegram's 4096 limit | Echo capped at `MAX_QUERY_LENGTH` (80) | Fixed | see git log |
 | F-33 | Low | `scheduler.py` `tick` | "Already sent" marks were saved only after sending; a crash mid-tick resent delivered cards | Save before sending and again after | Fixed | see git log |
-| F-34 | Low | `main.py` | `SqlitePersistence.close()` and `UsageTelemetry.close()` were never called, so each WAL is left for the next start to recover | `post_shutdown` wrapper closes both after PTB's final flush | Fixed | see git log |
 | F-22 | Medium | `scheduler.py`, `bot.py` | Render per user (not per place) at popular slots; no render semaphore | — | **Deferred** (TODO.md P1/P2) | — |
 | F-23 | Low | `bot.py` `/schedule` | Any group member can schedule sends to a group | — | **Deferred** (product decision) | — |
 | F-24 | Low | `runtime.py`, `cache.py`, `bot._card_limiter` | Module-level mutable singletons | — | **Accepted** (documented in CODING_STANDARDS.md) | — |
 | F-25 | Low | `bot.py` `_remember_place` | Shared `bot_data["places"]` can be primed by any user (stale label only) | — | **Deferred** | — |
+| F-34 | Low | `telemetry.py` `event_log` (:97-99, `_record`) | The raw event log (user id, username, event, city) grows without bound and is never pruned; `/export` caps only what is read. Disk growth and open-ended retention of identifiers | Raw rows older than `LOG_RETENTION_DAYS` (90) are deleted, at most once a day; aggregates stay. `/forget` erases a user's rows | Fixed (90 days is my choice; change the constant) | see git log |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -100,11 +100,11 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
 - Merged #43-#48 (Dependabot: Python 3.14-slim, setup-buildx 4.4.1, setup-qemu 4.4.0, setup-python 7.0.0,
   upload-artifact 7.0.2, build-push-action 7.4.0) after green CI.
 - Baseline on `main`: `pytest` 203 passed (3.13 and 3.14.6); ruff, format, mypy (28 files), bandit clean.
-  After merging #52 (telemetry, 209 tests) into this branch, final: 235 passed on 3.11.17, 3.13.16 and 3.14.6; ruff, format, mypy (30 files),
-  bandit clean; `pip-audit` on the exported lock: no known vulnerabilities (the lock gained only `aiolimiter`).
+  Final: 222 passed on 3.14.6; ruff, format, mypy (28 files), bandit clean; `pip-audit` on the exported lock: no known
+  vulnerabilities.
 - Method: run each branch's test suite against `main`'s source and read the commits, then port what is missing
-  (F-27 to F-34) instead of merging branches that carry competing versions of what #41 and #49 already contain.
-  New tests for F-31, F-32, F-33, F-34 and the oversize cap were confirmed to fail without the fix.
+  (F-27 to F-33) instead of merging branches that carry competing versions of what #41 and #49 already contain.
+  New tests for F-31, F-32, F-33 and the oversize cap were confirmed to fail without the fix.
 - Not run: the Docker build and Trivy scan (no daemon here), GitHub Actions, Telegram.
 
 | Branch | PR | Disposition |
@@ -118,9 +118,47 @@ Goal: merge or retire every open PR and unmerged branch, and port only what `mai
 | `snyk-fix-*`, `restyled/snyk-fix-*` | #18-#35 | Retired: they bump Python to 3.13 alpha/beta/rc tags; the image is on 3.14-slim |
 | `renovate/configure`, `restyled/renovate/configure` | - | Retired: 2023 Jitsi-bot era (root `main.py`) plus `renovate.json`; Dependabot is the dependency bot |
 | `dependabot/*` | #43-#48 | Merged |
-| `claude/dazzling-heisenberg-imfi0p` (= `chore/review-hardening-2026-10-21`, tip d520250) | #50 | Opened by another session while this pass ran. Superseded: its CI matrix is covered by F-28, its store-close fix is F-34 |
-| `claude/dazzling-heisenberg-h46q9s` (tip 6388665) | #51 | Same. Its idea of testing 3.11 is in the F-28 matrix |
-| `claude/dazzling-heisenberg-5o3sjy` | #52 | Merged by the owner (95e338a) while this pass ran: usage telemetry and admin `/stats`, requested by the owner (see the telemetry pass above for its privacy note). Not reviewed here, except that its SQLite connection is now closed at shutdown too (F-34) |
 
 Closed PRs keep their commits reachable through `refs/pull/<n>/head` after the branches are deleted; the one branch without
 a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while GitHub still holds the object.
+
+### Merge of the consolidation PR (#53) with `main` after #52
+- #53 conflicted with the telemetry PR (#52) in `main.py` and `runtime.py`; both kept (`build_application` from #53, telemetry and
+  admin ids wired in `start`).
+- Ported from #50: `SqlitePersistence.close()` is now called on shutdown, and the telemetry log is closed with it.
+  The rest of #50 (CI matrix 3.13 + 3.14) is already in #53. #51 (matrix 3.11 + 3.14) is folded in as a 3.11/3.13/3.14 matrix.
+- `claude/dazzling-heisenberg-um3y0i` is not merged: its response cap (512 KiB, `httpio`) is superseded by `httpcap` (F-21).
+
+## Review pass (2026-10-21, post-consolidation)
+- Baseline on `main` (cc25994), Python 3.11.17 venv: `pytest -q` 235 passed; `ruff check src tests scripts` and
+  `ruff format --check .` clean; `mypy` (strict) clean on 30 files; `bandit -q -c pyproject.toml -r src` rc 0;
+  `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
+- Scope: the code added since the last pass (`telemetry.py`, `/stats`, `/export`, flood control). Admin commands are registered
+  only for `ADMIN_USER_IDS` and re-check the numeric id; CSV cells are formula-escaped; HTML output is escaped; SQL is parameterised.
+- One new finding, F-34 (Low); fixed in the feature commit below. No Critical/High/Medium findings, so no code changed and no new tests were needed.
+- Secret scan of full history (bot-token regex) and of `src` for hard-coded credentials: no matches. No rotation needed.
+- Not run: Docker build/Trivy, GitHub Actions, Telegram.
+- Branch is `claude/dazzling-heisenberg-4xnydn` (environment-assigned), not `chore/review-hardening-<date>`.
+
+### Features added in the same PR (owner said: decide everything, keep it optimal)
+- `/forget` (confirm button): drops the user's persisted state and all telemetry rows (GDPR erasure); `/help` states the 90-day log retention.
+- `advice.py`: one caption line with clothing, umbrella (rain >= 50%), SPF (UV >= 6) and wind (gusts >= 30 km/h) tips. Thresholds are constants.
+- Final: `pytest -q` 243 passed; ruff, ruff format, mypy (31 files), bandit clean.
+- Not done, by choice: localisation, air quality, rain push alerts, inline mode (larger, need product input; listed in `TODO.md`).
+
+### Feature PR (2026-10-21): brainstorm and implementation
+The earlier `/forget` + retention + tips commit was pushed to the PR #55 branch *after* #55 was merged, so it never reached `main`; it is part of this PR.
+Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
+- New: `i18n.py` (en/uk chat text), `airquality.py` + `/air`, `alerts.py` + `/alerts` + `scheduler.alert_tick`, `planner.py` + `/compare` + `/best`, inline mode, all handlers in `handlers_extra.py`.
+- Security/robustness notes: every new input is length-checked (`MAX_QUERY_LENGTH`), HTML-escaped, `callback_data` for `/lang` is whitelisted, alert marks are persisted before sending, blocked users are unsubscribed, outbound calls reuse the capped, timeout-bound client.
+- Known limits: `/compare` makes up to 3 uncached geocode calls per command; `/best` ignores wind; card PNGs are English only.
+- Final: `pytest -q` 287 passed; ruff, ruff format, mypy strict (36 files), bandit clean.
+
+## Review pass (2026-10-21, scheduled re-check)
+- Baseline on `main` (73a277e), Python 3.11.17 venv: `pytest -q` 235 passed; `ruff check src tests scripts` and
+  `ruff format --check .` clean; `mypy` (strict) clean on 30 files; `bandit -q -c pyproject.toml -r src` rc 0;
+  `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
+- No commits since the previous pass, so no new code to review. Secret regex scan of tracked files: no matches.
+- No new findings; no code changed. F-22, F-23, F-25 and F-34 stay deferred (product/legal decisions, see above).
+- Not run: Docker build/Trivy, GitHub Actions, Telegram.
+- Branch is `claude/dazzling-heisenberg-1kiu1i` (environment-assigned), not `chore/review-hardening-<date>`.
