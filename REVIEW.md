@@ -145,3 +145,11 @@ a PR is recoverable from its tip SHA above (`git branch <name> <sha>`) while Git
 - `advice.py`: one caption line with clothing, umbrella (rain >= 50%), SPF (UV >= 6) and wind (gusts >= 30 km/h) tips. Thresholds are constants.
 - Final: `pytest -q` 243 passed; ruff, ruff format, mypy (31 files), bandit clean.
 - Not done, by choice: localisation, air quality, rain push alerts, inline mode (larger, need product input; listed in `TODO.md`).
+
+### Feature PR (2026-10-21): brainstorm and implementation
+The earlier `/forget` + retention + tips commit was pushed to the PR #55 branch *after* #55 was merged, so it never reached `main`; it is part of this PR.
+Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
+- New: `i18n.py` (en/uk chat text), `airquality.py` + `/air`, `alerts.py` + `/alerts` + `scheduler.alert_tick`, `planner.py` + `/compare` + `/best`, inline mode, all handlers in `handlers_extra.py`.
+- Security/robustness notes: every new input is length-checked (`MAX_QUERY_LENGTH`), HTML-escaped, `callback_data` for `/lang` is whitelisted, alert marks are persisted before sending, blocked users are unsubscribed, outbound calls reuse the capped, timeout-bound client.
+- Known limits: `/compare` makes up to 3 uncached geocode calls per command; `/best` ignores wind; card PNGs are English only.
+- Final: `pytest -q` 287 passed; ruff, ruff format, mypy strict (36 files), bandit clean.

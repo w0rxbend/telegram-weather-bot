@@ -259,13 +259,13 @@ boundary instead of every 30 s.
 
 ## Product / UX gaps worth tracking
 
-- **Localisation.** Captions, menus and the card text are English only; `language_code` is
+- **Localisation. [done for chat text: `i18n.py`, `/lang`; card images stay English]** Captions, menus and the card text are English only; `language_code` is
   already used for geocoding. Add `gettext` catalogs for the caption and menus first (cheap),
   then card labels.
 - **Sun-card schedule.** `/schedule` sends only the weather card. Add a per-schedule card
   kind, and a "sunset reminder" preset that fires at `sunset − 30 min` computed from the
   cached forecast.
-- **Weather alerts.** Open-Meteo has no warnings feed; consider a daily "rain expected"
+- **Weather alerts. [rain alerts done: `alerts.py`; frost/wind thresholds still open]** Open-Meteo has no warnings feed; consider a daily "rain expected"
   push based on `precipitation_probability_max ≥ 70`.
 - **Telegram Desktop setup.** Typed city names work, but the welcome text could show the
   city option more prominently when `message.from_user` has no location capability.

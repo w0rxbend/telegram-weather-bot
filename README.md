@@ -44,6 +44,12 @@ Everything is drawn with Pillow; no browser, no image assets, no API keys.
 | `/default N` · `/rename N name` · `/remove N` | Manage slots by number |
 | `/schedule` | Menu of notification presets; `/schedule 7:30 18:00` sets custom times, `/schedule off` stops |
 | `/units` | Toggle °C / km/h ↔ °F / mph (also a button under each card) |
+| `/air [slot]` | Air quality (European AQI, PM2.5, PM10) for a saved place |
+| `/alerts` (`on`/`off`) | Rain alert for the next hours at your default location (private chat) |
+| `/compare Kyiv, Lviv` | Side-by-side weather for 2–3 cities |
+| `/best run\|bike\|walk [slot]` | Best dry daylight hour in the next 24 h for an activity |
+| `/lang` | English / Українська (default: your Telegram language) |
+| `@bot Kyiv` | Inline mode in any chat; enable it with `/setinline` in @BotFather |
 | `/forget` | Erase everything stored about you (asks to confirm) |
 | `/help` | Command list |
 | *any text* | One-off card for that city; your slots stay unchanged |
