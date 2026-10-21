@@ -29,7 +29,10 @@ RUN addgroup --gid 1000 userapp \
 
 WORKDIR /app
 COPY --from=builder /build/requirements.txt ./requirements.txt
-RUN pip install -r requirements.txt
+# pip is not needed at runtime, and its vendored copies of certifi, urllib3, msgpack and
+# setuptools are what the Trivy gate in docker-ci.yml flags; drop it once the deps are in.
+RUN pip install -r requirements.txt \
+    && pip uninstall -y pip
 
 COPY src/ ./src
 

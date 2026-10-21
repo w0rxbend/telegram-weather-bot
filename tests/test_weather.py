@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from weather_bot import weather
+from weather_bot.httpcap import MAX_RESPONSE_BYTES
 from weather_bot.weather import (
     Forecast,
     WeatherError,
@@ -140,3 +141,15 @@ async def test_fetch_forecast_api_error() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(WeatherError, match="Latitude"):
             await fetch_forecast(client, 999, 0)
+
+
+async def test_fetch_forecast_rejects_oversized_body(payload: dict) -> None:
+    padding = b" " * (MAX_RESPONSE_BYTES + 1)  # keeps the JSON valid: only the size cap rejects it
+    body = json.dumps(payload).encode() + padding
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(WeatherError):
+            await fetch_forecast(client, 1.0, 2.0)

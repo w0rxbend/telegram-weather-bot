@@ -6,30 +6,23 @@ import asyncio
 import logging
 
 import httpx
-from telegram.ext import ApplicationBuilder
+from telegram.ext import AIORateLimiter, ApplicationBuilder
 
 from weather_bot import runtime, scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
-from weather_bot.config import load_settings
+from weather_bot.config import Settings, load_settings
 from weather_bot.legacy_state import import_pickle_state, quarantine_corrupt_state
 from weather_bot.persistence import SqlitePersistence
 from weather_bot.runtime import App
 from weather_bot.telemetry import UsageTelemetry
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+MAX_API_RETRIES = 3  # Bot API 429s the rate limiter retries before the error reaches a handler
 log = logging.getLogger(__name__)
 
 
-def start() -> None:
-    logging.basicConfig(format=LOG_FORMAT, level=logging.INFO)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    settings = load_settings()
-    store = SqlitePersistence(settings.persistence_file)
-    runtime.set_telemetry(UsageTelemetry(settings.telemetry_file))
-    runtime.set_admin_ids(settings.admin_ids)
-    quarantine_corrupt_state(settings.legacy_pickle_file)
-    import_pickle_state(settings.legacy_pickle_file, store)
+def build_application(settings: Settings, store: SqlitePersistence) -> App:
+    """Wire the PTB application; separate from ``start`` so tests can build it without polling."""
 
     def http_factory() -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -38,6 +31,13 @@ def start() -> None:
             follow_redirects=False,  # none of the three APIs redirect; do not follow surprises
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+
+    async def shutdown(app: App) -> None:
+        await post_shutdown(app)
+        store.close()
+        telemetry = runtime.telemetry()
+        if telemetry is not None:
+            telemetry.close()
 
     bot_post_init = make_post_init(http_factory)
     scheduler_task: list[asyncio.Task[None]] = []
@@ -53,13 +53,29 @@ def start() -> None:
         ApplicationBuilder()
         .token(settings.bot_token)
         .persistence(store)
+        .rate_limiter(AIORateLimiter(max_retries=MAX_API_RETRIES))
         .concurrent_updates(True)
         .post_init(post_init)
         .post_stop(post_stop)
-        .post_shutdown(post_shutdown)
+        .post_shutdown(shutdown)
         .build()
     )
     register_handlers(application)
+    return application
+
+
+def start() -> None:
+    logging.basicConfig(format=LOG_FORMAT, level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    settings = load_settings()
+    store = SqlitePersistence(settings.persistence_file)
+    runtime.set_telemetry(UsageTelemetry(settings.telemetry_file))
+    runtime.set_admin_ids(settings.admin_ids)
+    quarantine_corrupt_state(settings.legacy_pickle_file)
+    import_pickle_state(settings.legacy_pickle_file, store)
+
+    application = build_application(settings, store)
     log.info("Starting polling; state stored in %s", settings.persistence_file)
     application.run_polling(drop_pending_updates=True)
 
