@@ -53,6 +53,7 @@
 | F-35 | Medium | `bot.py` `register_handlers`, `handlers_extra.on_inline_query` | Inline queries drew on the 10/min card limiter (typing one search could lock the user out of `/weather`), got no answer once limited, and every query made an uncached geocode call | Own limiter (20/min), minimum 3 characters, `geocode.search_place_cached` (hits only, 1 h, 512 entries, also used by `/compare`), empty answers are not cached by the client | Fixed | see git log |
 | F-36 | Medium | `bot.py` HELP (en, uk), `telemetry.py` | `/help` said "Usage logs are kept for 90 days", but only `event_log` expires; `users` (username), `events` and `cities` (per-user city history) stay until `/forget` | The text now says what expires and what does not. **Expiry of the per-user totals is deferred:** `/stats` sums "cards" and the top cities from `cities`, so deleting old rows would change those numbers; moving rows older than 90 days to `user_id = 0` would keep the totals and drop the link to the person | Text fixed; expiry **Deferred** (owner decision) | see git log |
 | F-37 | Low | `planner.split_places` | `/compare Paris, France vs London` compared three "places": it split on commas even when "vs" was used, against its own usage text | "vs", "\|" and ";" are explicit separators; commas split only when none is present | Fixed | see git log |
+| F-38 | Low | `poetry.lock` (virtualenv 21.14.5, dev-only via pre-commit) | CVE-2026-113725 and CVE-2026-113722 reported by pip-audit (new advisories since the last pass); not in the runtime image | `poetry update virtualenv` → 21.14.12 (also moved packaging to 26.3) | Fixed (2026-10-22) | see git log |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -176,3 +177,8 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Baseline on `main` (1d7e890): `pytest -q` 287 passed. Final: 304 passed (17 new) on Python 3.11.17, 3.13.16 and 3.14.6; ruff, ruff format,
   mypy strict (36 files), bandit clean. Each new test fails without its fix (mutation-checked, including the geocode cache's four rules).
 - Not run: Docker, GitHub Actions, live Telegram or Open-Meteo. How often a real client sends inline queries while typing is assumed, not measured.
+
+## Scheduled re-check (2026-10-22)
+- Baseline on `main` (0ed06a1), Python 3.11.17: `pytest -q` 304 passed; `ruff check`/`ruff format --check` clean; `mypy` strict clean (36 files); `bandit -c pyproject.toml -r src` 0 issues; `pip-audit` on the lock: 2 vulnerabilities (F-38).
+- Final: same commands, `pip-audit` reports no known vulnerabilities; 304 passed. No new code findings in the modules added since the last pass (`alerts`, `airquality`, `handlers_extra`, `scheduler` retry path read in full or in part; not a full re-audit).
+- Not run: Docker, GitHub Actions, live Telegram.
