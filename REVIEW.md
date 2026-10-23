@@ -182,3 +182,8 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Baseline on `main` (0ed06a1), Python 3.11.17: `pytest -q` 304 passed; `ruff check`/`ruff format --check` clean; `mypy` strict clean (36 files); `bandit -c pyproject.toml -r src` 0 issues; `pip-audit` on the lock: 2 vulnerabilities (F-38).
 - Final: same commands, `pip-audit` reports no known vulnerabilities; 304 passed. No new code findings in the modules added since the last pass (`alerts`, `airquality`, `handlers_extra`, `scheduler` retry path read in full or in part; not a full re-audit).
 - Not run: Docker, GitHub Actions, live Telegram.
+
+## Scheduled re-check (2026-10-23)
+- Baseline on `main` (baaa46b), Python 3.11.17: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` 0 issues; `pip-audit -r <poetry export> --no-deps --disable-pip`: no known vulnerabilities.
+- No commits since the previous pass, so no new code to review. Secret regex scan of tracked files: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
+- Not run: Docker, GitHub Actions, live Telegram.
