@@ -192,3 +192,8 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Baseline on `main` (7a2b75a), Python 3.11.17: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check .` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` 0 issues; `pip-audit -r <pins from poetry.lock> --no-deps --disable-pip`: no known vulnerabilities.
 - Only docs commits since the previous pass, so no new code to review. Token-pattern scan of tracked files: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
 - Not run: Docker, GitHub Actions, live Telegram.
+
+## Scheduled re-check (2026-10-26)
+- Baseline on `main` (f20a471), Python 3.11.17: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check .` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` 0 issues; `pip-audit -r <pins from poetry.lock> --no-deps --disable-pip`: no known vulnerabilities.
+- Only GitHub Actions version bumps (Dependabot) since the previous pass, so no new application code to review. Token-pattern scan of tracked files: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
+- Not run: Docker, GitHub Actions, live Telegram.
