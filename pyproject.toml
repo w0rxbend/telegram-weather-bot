@@ -27,7 +27,7 @@ include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
-pytest-asyncio = ">=0.24"
+pytest-asyncio = ">=1.4.1"
 ruff = ">=0.6"
 mypy = ">=1.11"
 bandit = ">=1.7"
