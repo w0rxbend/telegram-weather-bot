@@ -29,7 +29,7 @@ include = [{ path = "src/weather_bot/assets/**/*", format = ["sdist", "wheel"] }
 pytest = ">=8.0"
 pytest-asyncio = ">=0.24"
 ruff = ">=0.6"
-mypy = ">=1.11"
+mypy = ">=2.4.1"
 bandit = ">=1.7"
 pip-audit = ">=2.7"
 pre-commit = ">=3.8"
