@@ -192,3 +192,11 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Baseline on `main` (7a2b75a), Python 3.11.17: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check .` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` 0 issues; `pip-audit -r <pins from poetry.lock> --no-deps --disable-pip`: no known vulnerabilities.
 - Only docs commits since the previous pass, so no new code to review. Token-pattern scan of tracked files: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
 - Not run: Docker, GitHub Actions, live Telegram.
+
+## Scheduled re-check (2026-11-11)
+- Baseline on `main` (f20a471), Python 3.11.18: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check src tests scripts` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` 0 issues; `pip-audit -r <poetry export> --no-deps --disable-pip`: no known vulnerabilities.
+- Since the 2026-10-24 pass, the only changes are Dependabot bumps to GitHub Actions (#61 to #64). Each new SHA was checked against upstream with `git ls-remote`: `actions/checkout` v7.0.1, `actions/setup-python` v7.1.0 and `docker/login-action` v4.6.0 match their tags. For `trivy-action` v0.36.0, the old pin `a9c7b0f` was the annotated tag object and the new `ed142fd` is the commit it points to, so the tag was not moved.
+- The 6 pytest warnings are PTB's `retry_after` deprecation notice. `scheduler._send_photo` already handles both the `timedelta` and the float form, so no change is needed.
+- Token-pattern scan of tracked files and of the new commits: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
+- Not run: Docker build/Trivy, GitHub Actions, live Telegram.
+- Branch is `claude/dazzling-heisenberg-2845zs` (environment-assigned), not `chore/review-hardening-<date>`.
