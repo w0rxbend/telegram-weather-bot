@@ -11,6 +11,7 @@ services:
       - no-new-privileges:true
     environment:
       - TG_BOT_TOKEN
+      - ADMIN_USER_IDS         # optional: numeric ids allowed to use /stats and /export
       - DATA_DIR=/data
     volumes:
       - weather-bot-data:/data

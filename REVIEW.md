@@ -55,12 +55,22 @@
 | F-37 | Low | `planner.split_places` | `/compare Paris, France vs London` compared three "places": it split on commas even when "vs" was used, against its own usage text | "vs", "\|" and ";" are explicit separators; commas split only when none is present | Fixed | see git log |
 | F-38 | Low | `poetry.lock` (virtualenv 21.14.5, dev-only via pre-commit) | CVE-2026-113725 and CVE-2026-113722 reported by pip-audit (new advisories since the last pass); not in the runtime image | `poetry update virtualenv` → 21.14.12 (also moved packaging to 26.3) | Fixed (2026-10-22) | see git log |
 
+| F-39 | Medium | `telemetry.py:79` `city_label`, `bot.py:311` `_build_card`, `bot.py:329,826`, `cache.py:92` (lines at b2b5974) | A place without a name is labelled with its coordinates at 3 decimals (about 100 m). That label was stored as the "city" next to the user id (`cities`, `event_log`), shown in `/stats` and exported by `/export`, although the docs say coordinates are never recorded. The same label, or the user's slot alias, was logged when a forecast failed | `city_label` returns "(unnamed place)" for a coordinate label; old rows are relabelled at startup, counts kept; log lines drop the place name | Fixed (2026-11-12) | 7bbdba6 |
+| F-40 | Low | `schedule.py:102` `parse_times` (:114, :117) | A rejected token was echoed whole; near 4096 characters the reply was too long for Telegram and the user got the generic error | Echo capped at `MAX_ECHO` (20) | Fixed (2026-11-12) | 81d8023 |
+| F-41 | Low | `scheduler.py:106` `_alert_user` (:135) | A rain alert to a deleted chat (`BadRequest: chat not found`) was logged with a traceback every 6 h, forever (noted on 2026-10-21, not fixed then) | Alerts are switched off for that user, as scheduled cards already are | Fixed (2026-11-12) | 1290dba |
+| F-42 | Low | `geocode.py:79,107-119`; `weather.py:274` `fetch_forecast` | Valid JSON of the wrong shape (list, string, result without coordinates) raised `AttributeError`/`KeyError`/`TypeError` instead of the fallback, `None` or `WeatherError` | Shape checks before use | Fixed (2026-11-12) | df06837 |
+| F-43 | Low | `docker-compose.yaml:12`, `docker-ci.yml:109,117` | `ADMIN_USER_IDS` never reached the container, so `/stats` and `/export` could not be enabled in the shipped deployment | Compose passes it; the deploy step exports it from the `ADMIN_USER_IDS` secret | Fixed (not run in Actions); **needs the secret, see Deferred** | 32f8649 |
+| F-44 | Low | `bot.py:941` `_guarded` | Only card handlers were rate limited; every other guarded update ran unlimited and wrote a telemetry transaction each time | 60 guarded updates per minute per user; the excess is dropped before telemetry | Fixed (60 is my choice: `bot.UPDATES_PER_MINUTE`) | 3688973 |
+| F-45 | Low | `.pre-commit-config.yaml:13` | The mypy hook depended on `types-python-dotenv`, which is not on PyPI (404), so `pre-commit run` failed during install and no hook ran; hook versions were also far behind the lock (mypy 1.11.2 vs 2.4.1, ruff 0.6.9 vs 0.17.1) | Real dependencies; revisions match `poetry.lock` | Fixed (2026-11-12) | 9f3686d |
+| F-46 | Low | `docker-ci.yml:82` build step | Only `:latest` was pushed, so the documented rollback ("deploy the previous image") had no image to name | Each build is also pushed as `:<commit sha>`; rollback command in README | Fixed (not run in Actions) | 32f8649 |
+
 Tooling and standards: 174be60, lock sync: see `git log`.
 
 ## Deferred — exact action required from you
 - **F-20 deploy check:** before the first deploy, back up the data volume; after it, confirm the log line `Imported N users` and that `bot_state.pickle.migrated` exists next to `bot_state.sqlite3`. Rollback: stop the bot, delete the `.sqlite3*` files, rename `.migrated` back to `.pickle`, deploy the previous image.
 - **F-22 / F-23:** product/capacity decisions; see `TODO.md`.
 - **F-27 / F-28:** after the merge, open the *Docker Image CI* run on `main` and confirm the Trivy step passes. Neither fix has run in Actions; if Trivy still fails, the log names the package.
+- **F-43:** to use `/stats` and `/export` in production, add the repository secret `ADMIN_USER_IDS` (your numeric Telegram id, comma-separated for several) and redeploy. Without it nothing changes.
 - **Deploy check:** after merge, run `docker compose up -d` and confirm `docker inspect --format '{{.State.Health.Status}}' <container>` becomes `healthy`, and that the bot starts with `read_only: true`.
 
 ## Facts (verified by running)
@@ -200,3 +210,31 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Token-pattern scan of tracked files and of the new commits: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
 - Not run: Docker build/Trivy, GitHub Actions, live Telegram.
 - Branch is `claude/dazzling-heisenberg-2845zs` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Review pass (2026-11-12)
+This pass re-read the source in full (`bot`, `handlers_extra`, `scheduler`, `telemetry`, `persistence`, `geocode`, `weather` fetch path, `cache`, `schedule`, `alerts`, `locations`, `config`, `main`, deployment files) instead of only the commits since the last pass. The render modules, `planner`, `advice`, `sun` and `i18n` tables were not re-read.
+
+- Baseline on `main` (b2b5974), Python 3.11.18: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check src tests scripts` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` rc 0; `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities. `pre-commit run --all-files` **failed** while installing the mypy hook (F-45); it had not been run in earlier passes.
+- Final: `pytest -q` 327 passed (23 new); ruff, ruff format, mypy strict (36 files), bandit clean; pip-audit: no known vulnerabilities; `pre-commit run --all-files` passes; `docker compose config` accepts the compose file; `scripts/preview.py` renders a card.
+- Eight new findings, F-39 to F-46: one Medium (privacy), seven Low. All fixed. Each code fix has a test that fails without it.
+- Since the 2026-11-11 pass `main` gained two Dependabot bumps: mypy 2.4.1 (#85) and `docker/login-action` v4.7.0 (#75). The new SHA `81c6f93` matches the upstream `v4.7.0` tag (`git ls-remote`).
+- Token-pattern scan of tracked files and of history: no matches.
+
+### Behaviour changes in this pass
+- `/stats` and `/export` show "(unnamed place)" where they showed coordinates; existing rows are relabelled on the first start.
+- More than 60 updates per minute from one user: the excess gets no reply.
+- A rain alert to a deleted chat switches that user's alerts off.
+
+### Assumptions
+- 60 updates per minute is above any real use. One inline search sends a query per pause in typing; I did not measure how many a real client sends.
+- A card name that is exactly `<number>.<digits>, <number>.<digits>` is a coordinate label. A real place with such a name would be counted as "(unnamed place)".
+
+### Uncertainties
+- Not run: Docker build, Trivy, GitHub Actions, live Telegram, Open-Meteo, Nominatim. The workflow edits (F-43, F-46) are parsed as YAML only. The first run of *Docker Image CI* on `main` after the merge is the test: check that the push step lists both tags.
+- The relabelling of old telemetry rows was tested on a database built in a test, not on the production file. It runs once at startup inside transactions; back up `telemetry.sqlite3` first if the numbers matter to you.
+- An empty `ADMIN_USER_IDS` secret is assumed to reach the container as an empty string or not at all; both mean "no admins".
+
+### Still deferred
+F-22, F-23, F-25 and the expiry part of F-36 (product decisions, see above). Chat text is still only partly localised.
+
+Branch is `claude/dazzling-heisenberg-lor6w7` (environment-assigned), not `chore/review-hardening-<date>`.

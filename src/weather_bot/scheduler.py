@@ -137,6 +137,13 @@ async def _alert_user(app: App, user_id: int, chat_id: int, data: UserData, now:
         alerts.disable(data)
         await _persist(app, [user_id])
         return 0
+    except BadRequest as exc:
+        if CHAT_GONE not in str(exc).lower():
+            raise
+        log.info("Chat of user %s no longer exists; rain alerts removed", user_id)
+        alerts.disable(data)
+        await _persist(app, [user_id])
+        return 0
     return 1
 
 

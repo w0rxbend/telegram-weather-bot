@@ -49,6 +49,39 @@ async def test_counts_events_users_and_cities(usage: UsageTelemetry) -> None:
     assert report.top_users[0].count == 4  # 2 commands + 2 cards
 
 
+def test_city_label_never_returns_coordinates() -> None:
+    # reverse geocoding failed, or a refresh button outlived the cached name (F-39)
+    assert city_label("50.450, 30.523") == telemetry.UNNAMED_PLACE
+    assert city_label("home · -33.868, 151.209") == telemetry.UNNAMED_PLACE
+    assert city_label("Area 51.5, Nevada") == "Area 51.5, Nevada"
+
+
+async def test_coordinates_are_not_stored_as_a_city(usage: UsageTelemetry) -> None:
+    with telemetry.acting_as(1):
+        await usage.record_card("home · 50.450, 30.523", "weather")
+    assert "50.450" not in await usage.export_csv()
+    assert (await usage.report()).top_cities == [telemetry.Ranked(telemetry.UNNAMED_PLACE, 1)]
+
+
+def test_coordinates_stored_by_older_versions_are_relabelled(tmp_path: Path) -> None:
+    path = tmp_path / "old.sqlite3"
+    old = UsageTelemetry(path)
+    for city, count in (("50.450, 30.523", 2), ("48.100, 11.500", 3), ("Kyiv, Ukraine", 4)):
+        old._db.execute("INSERT INTO cities VALUES (1, ?, ?, 100)", (city, count))
+        old._db.execute(
+            "INSERT INTO event_log (ts, user_id, event, city) VALUES (100, 1, 'card:weather', ?)",
+            (city,),
+        )
+    old.close()
+
+    reopened = UsageTelemetry(path)
+    cities = dict(reopened._db.execute("SELECT city, count FROM cities").fetchall())
+    logged = {row[0] for row in reopened._db.execute("SELECT city FROM event_log")}
+    reopened.close()
+    assert cities == {telemetry.UNNAMED_PLACE: 5, "Kyiv, Ukraine": 4}  # counts are kept
+    assert logged == {telemetry.UNNAMED_PLACE, "Kyiv, Ukraine"}
+
+
 async def test_card_without_actor_is_ignored(usage: UsageTelemetry) -> None:
     await usage.record_card("Kyiv, Ukraine", "weather")
     assert (await usage.report()).cards == 0
