@@ -83,3 +83,12 @@ def test_unknown_timezone_falls_back_to_utc() -> None:
     data: dict = {}
     s = sched.set_schedule(data, times=["10:00"], preset="x", tz="Mars/Olympus", chat_id=1)
     assert str(s.zone) == "UTC"
+
+
+def test_parse_times_error_echoes_a_capped_token() -> None:
+    # a 4096-character message echoed whole made the reply too long for Telegram (F-40)
+    with pytest.raises(ValueError, match="is not a time") as caught:
+        sched.parse_times("x" * 4096)
+    assert len(str(caught.value)) < 100
+    with pytest.raises(ValueError, match="“noon” is not a time"):
+        sched.parse_times("noon")

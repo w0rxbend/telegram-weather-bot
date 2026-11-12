@@ -21,6 +21,7 @@ KEY_SCHEDULE = "schedule"
 KEY_AWAITING_TIMES = "awaiting_schedule_times"
 
 MAX_TIMES = 24
+MAX_ECHO = 20  # characters of a rejected token repeated in the error message
 GRACE = timedelta(minutes=10)  # a slot still fires if the bot was busy/down for up to this long
 
 UserData = MutableMapping[str, Any]
@@ -99,6 +100,11 @@ class Schedule:
 _TIME_RE = re.compile(r"^(\d{1,2})(?:[:h.](\d{2}))?$")
 
 
+def _shown(token: str) -> str:
+    """The token as echoed to the user: capped, so the reply cannot outgrow a message."""
+    return token if len(token) <= MAX_ECHO else token[: MAX_ECHO - 1] + "…"
+
+
 def parse_times(text: str) -> list[str]:
     """Parse "7:30 12 18.45 21h00" into sorted, unique "HH:MM" strings.
 
@@ -111,10 +117,10 @@ def parse_times(text: str) -> list[str]:
     for token in tokens:
         m = _TIME_RE.match(token.lower())
         if not m:
-            raise ValueError(f"“{token}” is not a time. Use HH:MM, e.g. 7:30 13:00 19:00")
+            raise ValueError(f"“{_shown(token)}” is not a time. Use HH:MM, e.g. 7:30 13:00 19:00")
         hh, mm = int(m.group(1)), int(m.group(2) or 0)
         if not (0 <= hh <= 23 and 0 <= mm <= 59):
-            raise ValueError(f"“{token}” is not a valid time of day")
+            raise ValueError(f"“{_shown(token)}” is not a valid time of day")
         times.add(f"{hh:02d}:{mm:02d}")
     if len(times) > MAX_TIMES:
         raise ValueError(f"That is too many times; the limit is {MAX_TIMES} per day")
