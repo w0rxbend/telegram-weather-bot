@@ -326,7 +326,7 @@ async def _send_card(
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Forecast failed for %s: %s", place.name, exc)
+        log.warning("Forecast failed: %s", exc)  # no place name: alias or coordinates
         await message.reply_text(
             tr(_lang(context), "weather_down"),
             reply_markup=ReplyKeyboardRemove() if intro else None,
@@ -823,7 +823,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Refresh failed for %s: %s", place.name, exc)
+        log.warning("Refresh failed: %s", exc)  # no place name: alias or coordinates
         # The query was answered above and Telegram rejects a second answer, so tell the
         # user in the chat instead.
         await message.reply_text("Weather service is unavailable right now, try again shortly.")
