@@ -54,6 +54,7 @@
 | F-36 | Medium | `bot.py` HELP (en, uk), `telemetry.py` | `/help` said "Usage logs are kept for 90 days", but only `event_log` expires; `users` (username), `events` and `cities` (per-user city history) stay until `/forget` | The text now says what expires and what does not. **Expiry of the per-user totals is deferred:** `/stats` sums "cards" and the top cities from `cities`, so deleting old rows would change those numbers; moving rows older than 90 days to `user_id = 0` would keep the totals and drop the link to the person | Text fixed; expiry **Deferred** (owner decision) | see git log |
 | F-37 | Low | `planner.split_places` | `/compare Paris, France vs London` compared three "places": it split on commas even when "vs" was used, against its own usage text | "vs", "\|" and ";" are explicit separators; commas split only when none is present | Fixed | see git log |
 | F-38 | Low | `poetry.lock` (virtualenv 21.14.5, dev-only via pre-commit) | CVE-2026-113725 and CVE-2026-113722 reported by pip-audit (new advisories since the last pass); not in the runtime image | `poetry update virtualenv` → 21.14.12 (also moved packaging to 26.3) | Fixed (2026-10-22) | see git log |
+| F-39 | Low | `scheduler.py` `_alert_user` (:135-141) | A rain alert to a chat that no longer exists (`BadRequest: chat not found`) was logged as an error and retried every cooldown, forever (noted on 2026-10-21, not fixed then) | Same handling as scheduled cards: the subscription is removed; other `BadRequest`s still propagate | Fixed (2026-11-13) | b1616de |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -200,3 +201,13 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Token-pattern scan of tracked files and of the new commits: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
 - Not run: Docker build/Trivy, GitHub Actions, live Telegram.
 - Branch is `claude/dazzling-heisenberg-2845zs` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Scheduled re-check (2026-11-13)
+- Baseline on `main` (b2b5974), Python 3.11.18: `pytest -q` 304 passed; `ruff check src tests scripts` and `ruff format --check src tests scripts` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` rc 0; `pip-audit -r <pins from poetry show> --no-deps --disable-pip` (58 packages, dev included): no known vulnerabilities.
+- Final: same commands, 306 passed (2 new); everything else unchanged and clean.
+- Since the 2026-11-11 pass, two Dependabot bumps: mypy 2.4.0 to 2.4.1 (#85, dev-only) and `docker/login-action` v4.7.0 (#75). The new pin `81c6f93` matches the upstream `v4.7.0` tag (`git ls-remote`).
+- One fix, F-39 (Low): the open item from the 2026-10-21 follow-up. The new test fails without the fix.
+- Token-pattern scan of tracked files: no matches. F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
+- Not re-audited: the rest of the source is unchanged since the last full read; this pass covered the diff and `scheduler.py`.
+- Not run: Docker build/Trivy, GitHub Actions, live Telegram.
+- Branch is `claude/dazzling-heisenberg-kjz1ih` (environment-assigned), not `chore/review-hardening-<date>`.
