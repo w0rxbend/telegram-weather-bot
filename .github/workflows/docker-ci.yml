@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify me (commit)
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -82,7 +82,7 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
       - name: Notify me (image update)
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -122,7 +122,7 @@ jobs:
             docker compose up -d
             docker system prune -f
       - name: Notify me
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
