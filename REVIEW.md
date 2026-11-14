@@ -63,6 +63,7 @@
 | F-44 | Low | `bot.py:941` `_guarded` | Only card handlers were rate limited; every other guarded update ran unlimited and wrote a telemetry transaction each time | 60 guarded updates per minute per user; the excess is dropped before telemetry | Fixed (60 is my choice: `bot.UPDATES_PER_MINUTE`) | 3688973 |
 | F-45 | Low | `.pre-commit-config.yaml:13` | The mypy hook depended on `types-python-dotenv`, which is not on PyPI (404), so `pre-commit run` failed during install and no hook ran; hook versions were also far behind the lock (mypy 1.11.2 vs 2.4.1, ruff 0.6.9 vs 0.17.1) | Real dependencies; revisions match `poetry.lock` | Fixed (2026-11-12) | 9f3686d |
 | F-46 | Low | `docker-ci.yml:82` build step | Only `:latest` was pushed, so the documented rollback ("deploy the previous image") had no image to name | Each build is also pushed as `:<commit sha>`; rollback command in README | Fixed (not run in Actions) | 32f8649 |
+| F-47 | Low | `sun.py:46` `sun_info`, `caption.py:79,100-118`, `render/card.py:265` `_sun_tile`, `render/sun_card.py` (`_hero`, `_tiles`, `_week`) (lines at ebac46a) | Inside the polar circles Open-Meteo reports a day without sunrise or sunset as midnight placeholders. The captions and both cards showed them as real times ("Sunrise 00:00, Sunset 00:00", golden hour 23:00-00:00, a countdown to a sunrise that does not happen) | `sun.polar_state` recognises the two shapes; captions say "Polar night" / "Polar day" (en, uk); cards show a dash for the moments that do not exist | Fixed (2026-11-14) | a0967a0 |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -238,3 +239,24 @@ This pass re-read the source in full (`bot`, `handlers_extra`, `scheduler`, `tel
 F-22, F-23, F-25 and the expiry part of F-36 (product decisions, see above). Chat text is still only partly localised.
 
 Branch is `claude/dazzling-heisenberg-lor6w7` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Review pass (2026-11-14)
+`main` (b2b5974) has not changed since the 2026-11-12 pass, and the pull requests of the last two passes (#91, #92) are still open. This pass is built on the #91 branch (ebac46a), so it contains F-39 to F-46 and adds one commit. It read what the 2026-11-12 pass skipped: `planner`, `advice`, `sun`, `caption`, `weather.parse_forecast` and the render modules.
+
+- Baseline on ebac46a, Python 3.11.18: `pytest -q` 327 passed; `ruff check src tests scripts` and `ruff format --check src tests scripts` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` rc 0; `pip-audit -r <poetry show pins> --no-deps --disable-pip`: no known vulnerabilities.
+- Final: `pytest -q` 333 passed (6 new); the other commands give the same clean results; `scripts/preview.py` renders a card.
+- Method: both renderers, both captions, `advice_line`, `best_window` and `sun_info` were run on 13 altered forecasts (no hours left, one hour, flat temperatures, one day, polar, sunset before sunrise, extreme values, unknown weather codes, gaps in the hours) and on five place names (empty, 500 characters, right-to-left with HTML, emoji). Nothing raised except a forecast with NaN temperatures, which Open-Meteo does not send.
+- One new finding, F-47 (Low), fixed. The two polar shapes were read from the live API on 2026-11-14: Longyearbyen (night) gives sunrise = sunset = `T00:00` and `daylight_duration` 0; McMurdo (day) gives sunrise `T00:00`, sunset `T00:00` of the next day and 86400. I looked at the rendered polar cards.
+- Token-pattern scan of tracked files: no matches.
+
+### Open pull requests
+- **#91** (F-39 to F-46) is contained in this pass's pull request. Merging this one makes #91 redundant; merging #91 first leaves only F-47 here.
+- **#92** fixes the same rain-alert problem as F-41 in #91 and also calls it F-39. It conflicts with #91 in `scheduler.py`. Close it when #91 or this one is merged.
+- Dependabot #93 to #97 were not reviewed in depth. #95 moves the image to `python:3.15-slim`, while CI tests 3.11, 3.13 and 3.14: add 3.15 to the matrix in `ci.yml` and `docker-ci.yml` before merging it.
+
+### Assumptions and uncertainties
+- On the first or last day of a polar period one of the two times is real. That day is not treated as polar and is shown as before.
+- A place name longer than about 700 characters would be cut by the 1024-character caption limit in the middle of the HTML. The geocoders do not return such names, so this is not changed.
+- Not run: Docker build, Trivy, GitHub Actions, live Telegram.
+
+Branch is `claude/dazzling-heisenberg-kxvzdy` (environment-assigned), not `chore/review-hardening-<date>`.
