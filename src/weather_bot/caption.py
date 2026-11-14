@@ -12,7 +12,7 @@ from html import escape
 from weather_bot.advice import advice_line
 from weather_bot.i18n import DEFAULT_LANG, Lang, describe_weather, tr, weekday
 from weather_bot.render.theme import uv_label
-from weather_bot.sun import fmt_change, fmt_duration, sun_info
+from weather_bot.sun import Polar, fmt_change, fmt_duration, polar_state, sun_clock, sun_info
 from weather_bot.weather import DayPoint, Forecast, IconKind, compass, describe, icon_kind
 
 CAPTION_LIMIT = 1024
@@ -56,6 +56,18 @@ def _day_line(day: DayPoint, index: int, lang: Lang) -> str:
     return line
 
 
+def _polar_line(polar: Polar, lang: Lang) -> str:
+    return f"🌑 {tr(lang, 'polar_night')}" if polar == "night" else f"☀️ {tr(lang, 'polar_day')}"
+
+
+def _sun_line(day: DayPoint, lang: Lang) -> str:
+    polar = polar_state(day)
+    if polar:
+        return _polar_line(polar, lang)
+    rise, sset = sun_clock(day)
+    return f"🌅 {rise}  🌇 {sset}"
+
+
 def build_caption(
     place_name: str, fc: Forecast, outlook_days: int = 4, lang: Lang = DEFAULT_LANG
 ) -> str:
@@ -73,7 +85,7 @@ def build_caption(
         f"☔ {today.precipitation_probability_max}% "
         f"({today.precipitation_sum:.1f} {fc.precip_unit})  "
         f"🔆 UV {today.uv_index_max:.0f} {uv_label(today.uv_index_max)}",
-        f"🌅 {today.sunrise.strftime('%H:%M')}  🌇 {today.sunset.strftime('%H:%M')}",
+        _sun_line(today, lang),
         advice_line(fc, lang),
     ]
 
@@ -106,23 +118,26 @@ def build_sun_caption(
     daylight = f"☀️ {tr(lang, 'daylight')} <b>{fmt_duration(info.daylight)}</b>"
     if change:
         daylight += f" ({change})"
-    next_line = f"⏳ {info.next_event.capitalize()} in {fmt_duration(info.time_to_next_event)}"
-    ge0, ge1 = info.golden_evening
-    lines = [
-        f"🌇 <b>{name}</b>",
-        f"🌅 {tr(lang, 'sunrise')} <b>{info.sunrise.strftime('%H:%M')}</b>  ·  "
-        f"🌇 {tr(lang, 'sunset')} <b>{info.sunset.strftime('%H:%M')}</b>",
-        daylight,
-        f"🕛 {tr(lang, 'solar_noon')} {info.solar_noon.strftime('%H:%M')}  ·  "
-        f"✨ {tr(lang, 'golden_hour')} {ge0.strftime('%H:%M')}–{ge1.strftime('%H:%M')}",
-        next_line,
-    ]
+    if info.polar:  # no sunrise, sunset, solar noon or golden hour to report
+        lines = [f"🌇 <b>{name}</b>", _polar_line(info.polar, lang), daylight]
+    else:
+        next_line = f"⏳ {info.next_event.capitalize()} in {fmt_duration(info.time_to_next_event)}"
+        ge0, ge1 = info.golden_evening
+        lines = [
+            f"🌇 <b>{name}</b>",
+            f"🌅 {tr(lang, 'sunrise')} <b>{info.sunrise.strftime('%H:%M')}</b>  ·  "
+            f"🌇 {tr(lang, 'sunset')} <b>{info.sunset.strftime('%H:%M')}</b>",
+            daylight,
+            f"🕛 {tr(lang, 'solar_noon')} {info.solar_noon.strftime('%H:%M')}  ·  "
+            f"✨ {tr(lang, 'golden_hour')} {ge0.strftime('%H:%M')}–{ge1.strftime('%H:%M')}",
+            next_line,
+        ]
     upcoming = fc.daily[1:4]
     if upcoming:
         lines.append("")
         lines.append(f"📅 <b>{tr(lang, 'next_days')}</b>")
         for d in upcoming:
-            rise, sset = d.sunrise.strftime("%H:%M"), d.sunset.strftime("%H:%M")
+            rise, sset = sun_clock(d)
             lines.append(f"{weekday(lang, d.date)} 🌅 {rise} 🌇 {sset}")
     lines.append("")
     lines.append(_footer(fc, lang))
