@@ -19,7 +19,15 @@ from weather_bot.render.card import (
 )
 from weather_bot.render.sunpath import SUN_RGB, draw_sun_path
 from weather_bot.render.theme import RGB, WHITE
-from weather_bot.sun import SunInfo, daylight_of, fmt_change, fmt_duration, sun_info
+from weather_bot.sun import (
+    NO_TIME,
+    SunInfo,
+    fmt_change,
+    fmt_duration,
+    polar_state,
+    sun_clock,
+    sun_info,
+)
 from weather_bot.weather import Forecast
 
 HEIGHT = 1440
@@ -28,7 +36,12 @@ TOP: RGB = (28, 24, 74)
 BOTTOM: RGB = (226, 122, 70)
 WARM: RGB = (255, 168, 82)
 VIOLET: RGB = (150, 110, 220)
+POLAR_NOTE = {"night": "polar night", "day": "polar day"}
 GOLD: RGB = (255, 150, 60)
+
+
+def _clock(sunrise: datetime, sunset: datetime) -> tuple[str, str]:
+    return sunrise.strftime("%H:%M"), sunset.strftime("%H:%M")
 
 
 def _hero(c: Canvas, info: SunInfo, now: datetime) -> None:
@@ -46,7 +59,7 @@ def _hero(c: Canvas, info: SunInfo, now: datetime) -> None:
     )
 
     # golden hours as warm overlays on the day arc
-    if info.daylight > timedelta(0):
+    if info.polar is None and info.daylight > timedelta(0):
         share = min(0.5, 3600 / info.daylight.total_seconds()) * 180
         layer = c.layer()
         d = ImageDraw.Draw(layer)
@@ -57,20 +70,22 @@ def _hero(c: Canvas, info: SunInfo, now: datetime) -> None:
 
     # sunrise / sunset labels under the horizon ends
     c.text(PAD, cy + 26, "SUNRISE", "medium", 18, alpha=0.62, tracking=1.6)
-    c.text(PAD, cy + 94, info.sunrise.strftime("%H:%M"), "display", 54, anchor="ls")
+    rise, sset = (NO_TIME, NO_TIME) if info.polar else _clock(info.sunrise, info.sunset)
+    c.text(PAD, cy + 94, rise, "display", 54, anchor="ls")
     c.text(WIDTH - PAD, cy + 26, "SUNSET", "medium", 18, alpha=0.62, tracking=1.6, anchor="ra")
-    c.text(WIDTH - PAD, cy + 94, info.sunset.strftime("%H:%M"), "display", 54, anchor="rs")
+    c.text(WIDTH - PAD, cy + 94, sset, "display", 54, anchor="rs")
 
     # apex: solar noon
-    c.text(
-        cx,
-        cy - r - 34,
-        f"solar noon {info.solar_noon.strftime('%H:%M')}",
-        "regular",
-        20,
-        alpha=0.6,
-        anchor="ms",
-    )
+    if info.polar is None:
+        c.text(
+            cx,
+            cy - r - 34,
+            f"solar noon {info.solar_noon.strftime('%H:%M')}",
+            "regular",
+            20,
+            alpha=0.6,
+            anchor="ms",
+        )
 
     # now marker label
     label = f"now {now.strftime('%H:%M')}"
@@ -90,10 +105,8 @@ def _hero(c: Canvas, info: SunInfo, now: datetime) -> None:
 
 def _tiles(c: Canvas, info: SunInfo, fc: Forecast) -> None:
     tomorrow = fc.tomorrow
-    next_sunrise = tomorrow.sunrise.strftime("%H:%M") if tomorrow else "—"
+    next_sunrise = sun_clock(tomorrow)[0] if tomorrow else NO_TIME
     night = timedelta(hours=24) - info.daylight
-    gm0, gm1 = info.golden_morning
-    ge0, ge1 = info.golden_evening
     next_label = "SUNSET IN" if info.next_event == "sunset" else "SUNRISE IN"
     next_at = (
         info.sunset
@@ -106,6 +119,23 @@ def _tiles(c: Canvas, info: SunInfo, fc: Forecast) -> None:
     )
     tiles = [
         ("DAYLIGHT", fmt_duration(info.daylight), fmt_change(info.change_vs_yesterday)),
+    ]
+    if info.polar:  # these four moments do not exist today
+        note = POLAR_NOTE[info.polar]
+        tiles += [
+            (label, NO_TIME, note)
+            for label in ("SOLAR NOON", next_label, "GOLDEN HOUR · AM", "GOLDEN HOUR · PM")
+        ]
+    else:
+        tiles += _moment_tiles(info, next_label, next_at)
+    tiles.append(("NIGHT", fmt_duration(night), f"sunrise tomorrow {next_sunrise}"))
+    _draw_tiles(c, tiles)
+
+
+def _moment_tiles(info: SunInfo, next_label: str, next_at: datetime) -> list[tuple[str, str, str]]:
+    gm0, gm1 = info.golden_morning
+    ge0, ge1 = info.golden_evening
+    return [
         ("SOLAR NOON", info.solar_noon.strftime("%H:%M"), "sun at its highest"),
         (next_label, fmt_duration(info.time_to_next_event), f"at {next_at.strftime('%H:%M')}"),
         (
@@ -118,8 +148,10 @@ def _tiles(c: Canvas, info: SunInfo, fc: Forecast) -> None:
             f"{ge0.strftime('%H:%M')}–{ge1.strftime('%H:%M')}",
             "best sunset light",
         ),
-        ("NIGHT", fmt_duration(night), f"sunrise tomorrow {next_sunrise}"),
     ]
+
+
+def _draw_tiles(c: Canvas, tiles: list[tuple[str, str, str]]) -> None:
     cols, gap, th, top = 3, 16, 128, 728
     tw = (INNER - gap * (cols - 1)) / cols
     for i, (label, value, sub) in enumerate(tiles):
@@ -163,8 +195,9 @@ def _week(c: Canvas, fc: Forecast) -> None:
             c.box(x0, bar_y0 + 7, x1, bar_y1 - 7), radius=c.px(2), fill=_alpha(WHITE, 0.10)
         )
         c.composite(layer)
-        if daylight_of(day) > timedelta(0):
-            bx0, bx1 = hx(day.sunrise), hx(day.sunset)
+        polar = polar_state(day)
+        if polar != "night":
+            bx0, bx1 = (x0, x1) if polar == "day" else (hx(day.sunrise), hx(day.sunset))
             w, h = c.px(bx1 - bx0), c.px(bar_y1 - bar_y0)
             if w > 2:
                 grad = Image.composite(
@@ -179,6 +212,8 @@ def _week(c: Canvas, fc: Forecast) -> None:
                 opacity = 0.95 if i == 0 else 0.8
                 grad.putalpha(mask.point(lambda v, o=opacity: int(v * o)))
                 c.composite(grad, bx0, bar_y0)
+            if polar == "day":
+                continue  # a full bar, no sunrise or sunset to label
             c.text(
                 bx0 + 10,
                 y + 11,
@@ -223,7 +258,10 @@ def render_sun_image(fc: Forecast, place_name: str, now: datetime | None = None)
     c.glow(WIDTH - 40, 1250, 300, WARM, 0.16, 100)
 
     _header(c, fc, place_name, now)
-    note = f"{info.next_event} in {fmt_duration(info.time_to_next_event)}"
+    if info.polar:
+        note = POLAR_NOTE[info.polar]
+    else:
+        note = f"{info.next_event} in {fmt_duration(info.time_to_next_event)}"
     _section_title(c, 190, "SUN TODAY", note)
     _hero(c, info, now)
     _tiles(c, info, fc)

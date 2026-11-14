@@ -61,6 +61,14 @@ STRINGS: dict[str, dict[Lang, str]] = {
     "daylight": {"en": "Daylight", "uk": "Світловий день"},
     "solar_noon": {"en": "Solar noon", "uk": "Сонячний полудень"},
     "golden_hour": {"en": "Golden hour", "uk": "Золота година"},
+    "polar_night": {
+        "en": "Polar night: the sun does not rise today",
+        "uk": "Полярна ніч: сонце сьогодні не сходить",
+    },
+    "polar_day": {
+        "en": "Polar day: the sun does not set today",
+        "uk": "Полярний день: сонце сьогодні не заходить",
+    },
     "coat_winter": {"en": "Winter coat", "uk": "Зимова куртка"},
     "coat_warm": {"en": "Warm jacket", "uk": "Тепла куртка"},
     "coat_light": {"en": "Light jacket", "uk": "Легка куртка"},

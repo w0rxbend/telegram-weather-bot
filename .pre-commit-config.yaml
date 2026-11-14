@@ -1,18 +1,18 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.17.1
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
+    rev: v2.4.1
     hooks:
       - id: mypy
         files: ^src/
-        additional_dependencies: ["python-telegram-bot>=22,<23", "httpx", "pillow", "types-python-dotenv"]
+        additional_dependencies: ["python-telegram-bot[rate-limiter]>=22,<23", "httpx", "pillow", "python-dotenv"]
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.10
+    rev: 1.9.4
     hooks:
       - id: bandit
         args: [-c, pyproject.toml, -r, src]

@@ -255,6 +255,22 @@ async def test_refresh_failure_answers_the_query_once_and_replies_in_chat() -> N
     query.edit_message_media.assert_not_awaited()
 
 
+async def test_forecast_failure_log_has_no_alias_or_coordinates(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, Place("50.450, 30.523", 50.45, 30.523), "moms house")
+    update = make_update()
+    with patch.object(bot, "cached_forecast", AsyncMock(side_effect=WeatherError("down"))):
+        await bot.cmd_weather(update, ctx)
+        await bot.on_card_callback(
+            SimpleNamespace(callback_query=make_query("r|50.4500|30.5230")), ctx
+        )
+    assert "down" in caplog.text
+    assert "moms house" not in caplog.text
+    assert "50.4" not in caplog.text
+
+
 async def test_units_callback_toggles_units(forecast: Forecast) -> None:
     ctx = make_context()
     query = make_query("u|50.4500|30.5200")

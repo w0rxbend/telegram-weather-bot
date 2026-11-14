@@ -117,11 +117,15 @@ set: upload `docs/avatar.png` with `/setuserpic` in @BotFather (regenerate it wi
 ### Deployment pipeline
 
 `.github/workflows/docker-ci.yml` runs on every push to `main`: it builds a multi-arch image,
-pushes it to Docker Hub as `<DOCKERHUB_USERNAME>/telegram-weather-bot:latest`, copies
+pushes it to Docker Hub as `<DOCKERHUB_USERNAME>/telegram-weather-bot:latest` and as
+`:<commit sha>`, copies
 `docker-compose.yaml` to the server over SCP and runs `docker compose up -d` there.
 Secrets it needs: `DOCKERHUB_USERNAME`, `DOCKERHUB_PASSWORD`, `SSH_HOST`, `SSH_USERNAME`,
 `SSH_KEY`, `SSH_PORT`, `TG_BOT_TOKEN`, and `TELEGRAM_NOTIFY_CHAT` / `TELEGRAM_NOTIFY_TOKEN`
-for the status messages.
+for the status messages. Optional: `ADMIN_USER_IDS` (who may use `/stats` and `/export`).
+
+Rollback: on the server, `WEATHER_BOT_IMAGE=<DOCKERHUB_USERNAME>/telegram-weather-bot:<commit sha> docker compose up -d`
+with the sha of the last good commit on `main`.
 
 ## Usage telemetry
 
@@ -131,7 +135,9 @@ cards were requested. Coordinates, message text and chat ids are not stored. Set
 `ADMIN_USER_IDS` and send `/stats`: an infographic card (totals, top cities, users, actions) with a 14-day activity chart, followed by the same as text.
 Every event is also appended to a raw log (time, user id, command/button, city; city only for
 cards), so any question can be answered later with SQL (`event_log` table), and `/export`
-(admin only) sends it as CSV (newest 200 000 rows). The log is never pruned automatically.
+(admin only) sends it as CSV (newest 200 000 rows). Log rows older than 90 days are deleted
+automatically; the counters stay until the user sends `/forget`. A place that has no name is
+counted as “(unnamed place)”, never by its coordinates.
 `/help` tells users that this is collected. Delete the file to reset it.
 
 ## Development

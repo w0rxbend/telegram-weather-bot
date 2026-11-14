@@ -266,7 +266,7 @@ def _sun_tile(
     c: Canvas, fc: Forecast, now: datetime, x0: float, y0: float, tw: float, th: float
 ) -> None:
     from weather_bot.render.sunpath import draw_sun_path
-    from weather_bot.sun import fmt_duration, sun_info
+    from weather_bot.sun import fmt_duration, sun_clock, sun_info
 
     info = sun_info(fc, now)
     c.glass(x0, y0, x0 + tw, y0 + th)
@@ -286,13 +286,12 @@ def _sun_tile(
         night_ry_ratio=0.3,
         horizon_half_width=tw / 2 - 22,
     )
-    c.text(
-        x0 + 22, horizon + 20, f"↑ {info.sunrise.strftime('%H:%M')}", "semibold", 18, anchor="ls"
-    )
+    rise, sset = sun_clock(fc.today)
+    c.text(x0 + 22, horizon + 20, f"↑ {rise}", "semibold", 18, anchor="ls")
     c.text(
         x0 + tw - 22,
         horizon + 20,
-        f"↓ {info.sunset.strftime('%H:%M')}",
+        f"↓ {sset}",
         "semibold",
         18,
         anchor="rs",
