@@ -191,6 +191,22 @@ async def test_blocked_user_loses_rain_alerts(forecast: Forecast) -> None:
     assert alerts.chat_id_for(data) is None
 
 
+async def test_vanished_chat_loses_rain_alerts(forecast: Forecast) -> None:
+    app, data = alert_app(forecast)
+    app.bot.send_message = AsyncMock(side_effect=BadRequest("Chat not found"))
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 0
+    assert alerts.chat_id_for(data) is None
+
+
+async def test_other_bad_request_keeps_rain_alerts(forecast: Forecast) -> None:
+    app, data = alert_app(forecast)
+    app.bot.send_message = AsyncMock(side_effect=BadRequest("Can't parse entities"))
+    with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):
+        assert await scheduler.alert_tick(app, datetime(2026, 10, 17, 11, 0, tzinfo=UTC)) == 0
+    assert alerts.chat_id_for(data) == 555
+
+
 async def test_forecast_failure_skips_the_alert(forecast: Forecast) -> None:
     app, _ = alert_app(forecast)
     failing = AsyncMock(side_effect=WeatherError("down"))

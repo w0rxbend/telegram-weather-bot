@@ -54,6 +54,7 @@
 | F-36 | Medium | `bot.py` HELP (en, uk), `telemetry.py` | `/help` said "Usage logs are kept for 90 days", but only `event_log` expires; `users` (username), `events` and `cities` (per-user city history) stay until `/forget` | The text now says what expires and what does not. **Expiry of the per-user totals is deferred:** `/stats` sums "cards" and the top cities from `cities`, so deleting old rows would change those numbers; moving rows older than 90 days to `user_id = 0` would keep the totals and drop the link to the person | Text fixed; expiry **Deferred** (owner decision) | see git log |
 | F-37 | Low | `planner.split_places` | `/compare Paris, France vs London` compared three "places": it split on commas even when "vs" was used, against its own usage text | "vs", "\|" and ";" are explicit separators; commas split only when none is present | Fixed | see git log |
 | F-38 | Low | `poetry.lock` (virtualenv 21.14.5, dev-only via pre-commit) | CVE-2026-113725 and CVE-2026-113722 reported by pip-audit (new advisories since the last pass); not in the runtime image | `poetry update virtualenv` → 21.14.12 (also moved packaging to 26.3) | Fixed (2026-10-22) | see git log |
+| F-39 | Low | `scheduler.py` `_alert_user` (:136-142 before the fix) | A rain alert to a chat that no longer exists raised `BadRequest: chat not found`, caught only by `alert_tick`'s catch-all: one logged error per alert check per such user, forever. Noted on 2026-10-21 but never given an ID | Same handling as scheduled cards: alerts are disabled for that user and the state is saved; other `BadRequest` errors are still raised | Fixed (2026-11-18) | 0bcfe6d |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -200,3 +201,12 @@ Decisions and rejected ideas: `docs/decisions/0002-feature-brainstorm.md`.
 - Token-pattern scan of tracked files and of the new commits: no matches. No new findings; F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
 - Not run: Docker build/Trivy, GitHub Actions, live Telegram.
 - Branch is `claude/dazzling-heisenberg-2845zs` (environment-assigned), not `chore/review-hardening-<date>`.
+
+## Scheduled re-check (2026-11-18)
+- Baseline on `main` (b2b5974), Python 3.11.18: `pytest -q` 304 passed; `ruff check .` and `ruff format --check .` clean; `mypy` strict clean (36 files); `bandit -q -c pyproject.toml -r src` rc 0; `pip-audit` on the installed Poetry environment: no known vulnerabilities (the project itself is skipped, it is not on PyPI).
+- Final: `pytest -q` 306 passed (2 new); `ruff format`, `ruff check src tests scripts`, `mypy`, bandit clean. The new chat-gone test fails without the fix.
+- Since the 2026-11-11 pass, the only changes are two Dependabot bumps: mypy 2.4.0 to 2.4.1 (#85, dev-only; lock diff touches nothing else) and `docker/login-action` to v4.7.0 (#75). `git ls-remote` confirms the pinned SHA `81c6f93` is the `v4.7.0` tag.
+- One finding, F-39 (Low), fixed in 0bcfe6d. It is the rain-alert item written up in prose on 2026-10-21 and left open since. The other item from that note (54 English-only reply sites in `bot.py`) is a feature gap, not a defect, and is unchanged.
+- Token-pattern scan of tracked files and of the new commits: no matches. F-22, F-23, F-25 and F-36 (expiry part) stay deferred.
+- Not re-audited: the rest of the source, which has not changed since the earlier passes. Not run: Docker build/Trivy, GitHub Actions, live Telegram.
+- Branch is `claude/dazzling-heisenberg-ak5ysg` (environment-assigned), not `chore/review-hardening-<date>`.
