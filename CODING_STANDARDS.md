@@ -13,7 +13,8 @@ machine-checked; reviewers enforce it.
   *Why:* hidden globals make tests order-dependent. (`runtime.py` and the forecast cache are
   existing exceptions.)
 - Settings are read once in `config.py`, typed, and validated at startup; never `os.getenv`
-  inside business code.
+  inside business code. (Existing exceptions: the optional `BOT_*` texts in `identity.py`,
+  and `health.py`, which runs as its own process.)
 
 ## Naming and size
 - Names say what a thing is: `due_times`, not `get_stuff`. Constants are `UPPER_SNAKE`, no
@@ -32,7 +33,7 @@ machine-checked; reviewers enforce it.
 - Every `create_task` keeps a reference and has a done-callback or an awaiting owner.
   *Why:* unreferenced tasks are garbage-collected mid-run and swallow exceptions.
 - Every outbound HTTP call has a timeout (set on the shared client) and a bounded retry.
-- Handlers that mutate `user_data` run serialized per user (see `bot._serialized`).
+- Handlers that mutate `user_data` run serialized per user (see `bot._guarded`).
 
 ## Errors and logging
 - No bare `except:`; `except Exception` only at a boundary (error handler, scheduler loop)
@@ -44,16 +45,30 @@ machine-checked; reviewers enforce it.
   log.error("bad update %s", update)  # bad: dumps text + location
   log.error("update %s failed", update.update_id)  # good
   ```
+- A place name is personal data: it can be a user's slot alias, or coordinates when
+  geocoding failed. Do not log it; telemetry stores it only through `telemetry.city_label`.
 
 ## Telegram rules
 - All user text echoed with `parse_mode=HTML` goes through `html.escape`.
 - `callback_data` ≤ 64 bytes and is untrusted: parse defensively, range-check numbers
   (latitude −90…90, longitude −180…180), and fall back to "button expired".
 - Every callback query handler calls `query.answer()` on every path, including errors.
+  Callback data that matches no handler is answered by `bot.on_unknown_callback`.
+- A button that changes or deletes a user's data carries that user's id in its
+  `callback_data` and is refused for anyone else (`bot._foreign_button`). *Why:* in a group
+  everybody can tap it, and handlers act on the data of whoever taps.
+- State that waits for the user's next message (`awaiting_*`) stores the time it was asked
+  and expires (`bot.PROMPT_TTL_SECONDS`). *Why:* persisted flags otherwise capture a message
+  sent days later.
 - Handlers only react to `UpdateType.MESSAGE` (no edited messages, no channel posts).
 - Scheduled/bulk sends handle `RetryAfter` (sleep, one retry) and `Forbidden` (unsubscribe).
 - Interactive card requests are rate limited per user (`ratelimit.py`).
-- Authorization is by numeric user id, never username. (No admin commands exist today.)
+- Echo at most a short, capped piece of user input in a reply (`MAX_QUERY_LENGTH`,
+  `schedule.MAX_ECHO`). *Why:* a 4096-character message echoed inside a longer sentence is
+  rejected by Telegram ("message is too long") and the user only sees the generic error.
+- Parse upstream JSON defensively: check the shape (`isinstance`) before `.get`/indexing and
+  turn a bad shape into the module's own error or fallback, never `AttributeError`/`KeyError`.
+- Authorization is by numeric user id, never username (`ADMIN_USER_IDS`, `runtime.is_admin`).
 
 ## Security
 - Secrets come from the environment only; `.env` is git-ignored. Nothing secret in the image,
@@ -61,6 +76,8 @@ machine-checked; reviewers enforce it.
 - Validate every user-supplied value: length, charset (strip control characters), range.
 - No `pickle` of external data, `eval`, `exec`, `shell=True`.
 - Dependencies are pinned by `poetry.lock`; `pip-audit` must be clean before merging.
+- Hook versions in `.pre-commit-config.yaml` follow the versions in `poetry.lock`, so a local
+  run and CI agree.
 - The container runs as non-root with a read-only root filesystem.
 
 ## Testing

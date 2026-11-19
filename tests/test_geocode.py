@@ -198,3 +198,33 @@ async def test_search_place_cached_is_bounded(monkeypatch: pytest.MonkeyPatch) -
         await search_place_cached(client, "Ccc")  # still cached
         await search_place_cached(client, "Aaa")  # evicted by Ccc, fetched again
     assert fetched == ["Aaa", "Bbb", "Ccc", "Aaa"]
+
+
+def _client_answering(body: object) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    )
+
+
+@pytest.mark.parametrize("body", [[], "busy", 7, {"address": "nowhere"}, {"error": "x"}])
+async def test_reverse_geocode_survives_unexpected_json(body: object) -> None:
+    # valid JSON of the wrong shape used to raise AttributeError (F-42)
+    async with _client_answering(body) as client:
+        place = await reverse_geocode(client, 50.45, 30.52)
+    assert place.name == "50.450, 30.520"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        "busy",
+        {"results": "none"},
+        {"results": ["Kyiv"]},
+        {"results": [{"name": "Kyiv"}]},
+        {"results": [{"name": "Kyiv", "latitude": None, "longitude": 30.5}]},
+    ],
+)
+async def test_search_place_survives_unexpected_json(body: object) -> None:
+    async with _client_answering(body) as client:
+        assert await search_place(client, "Kyiv") is None

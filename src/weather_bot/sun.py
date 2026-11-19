@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
 from weather_bot.weather import DayPoint, Forecast
 
 GOLDEN_HOUR = timedelta(hours=1)
+FULL_DAY = timedelta(hours=24)
+NO_TIME = "—"  # shown where a sunrise or sunset does not exist
+
+Polar = Literal["day", "night"]
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,7 @@ class SunInfo:
     night_progress: float  # 0..1 from sunset to the next sunrise while it is down
     next_event: str  # "sunset" or "sunrise"
     time_to_next_event: timedelta
+    polar: Polar | None = None  # set when the sun does not rise or does not set today
 
     @property
     def golden_morning(self) -> tuple[datetime, datetime]:
@@ -34,6 +40,27 @@ class SunInfo:
 
 def daylight_of(day: DayPoint) -> timedelta:
     return max(day.sunset - day.sunrise, timedelta(0))
+
+
+def polar_state(day: DayPoint) -> Polar | None:
+    """Tell a day without a sunrise or a sunset from an ordinary one.
+
+    Open-Meteo has no "none" value: in polar night both times are midnight of that day
+    (no daylight), in polar day they are midnight and the next midnight (24 hours).
+    """
+    daylight = daylight_of(day)
+    if daylight <= timedelta(0):
+        return "night"
+    if daylight >= FULL_DAY:
+        return "day"
+    return None
+
+
+def sun_clock(day: DayPoint) -> tuple[str, str]:
+    """Sunrise and sunset as HH:MM, or ``NO_TIME`` twice on a polar day or night."""
+    if polar_state(day):
+        return NO_TIME, NO_TIME
+    return day.sunrise.strftime("%H:%M"), day.sunset.strftime("%H:%M")
 
 
 def _fraction(start: datetime, end: datetime, now: datetime) -> float:
@@ -66,6 +93,10 @@ def sun_info(fc: Forecast, now: datetime | None = None) -> SunInfo:
         night_progress = _fraction(sunset, next_sunrise, now)
         next_event, until = "sunrise", next_sunrise - now
 
+    polar = polar_state(today)
+    if polar == "night":
+        progress = 0.0  # the sun has not crossed the sky; the code above saw "after sunset"
+
     return SunInfo(
         sunrise=sunrise,
         sunset=sunset,
@@ -77,6 +108,7 @@ def sun_info(fc: Forecast, now: datetime | None = None) -> SunInfo:
         night_progress=night_progress,
         next_event=next_event,
         time_to_next_event=max(until, timedelta(0)),
+        polar=polar,
     )
 
 

@@ -4,7 +4,16 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from telegram import Chat, InlineQuery, Location, Message, MessageEntity, Update, User
+from telegram import (
+    CallbackQuery,
+    Chat,
+    InlineQuery,
+    Location,
+    Message,
+    MessageEntity,
+    Update,
+    User,
+)
 from telegram.ext import Application, ApplicationBuilder
 
 from weather_bot import bot
@@ -66,4 +75,27 @@ def test_new_commands_and_inline_queries_are_routed(app: Application) -> None:
         update = Update(update_id=1, message=command_message)
         assert matching_callbacks(app, update), command
     inline = Update(update_id=2, inline_query=InlineQuery("1", USER, "Kyiv", ""))
+    assert "on_unknown_callback" not in matching_callbacks(app, inline)
     assert "on_inline_query" in matching_callbacks(app, inline)
+
+
+def first_callback_handler(app: Application, data: str) -> str:
+    """The handler PTB runs for a button: the first one in the group that matches."""
+    update = Update(update_id=3, callback_query=CallbackQuery("1", USER, "c", data=data))
+    for handler in app.handlers[0]:
+        if handler.check_update(update):
+            return str(handler.callback.__name__)
+    return ""
+
+
+def test_unrecognised_callback_data_is_still_answered(app: Application) -> None:
+    """F-50: a button from an older release must not leave its spinner running."""
+    assert first_callback_handler(app, "zz|from-an-old-release") == "on_unknown_callback"
+    for data, expected in (
+        ("r|50.4500|30.5200", "on_card_callback"),
+        ("x|0|5", "on_slot_callback"),
+        ("sch|morning", "on_schedule_callback"),
+        ("forget|yes|5", "on_forget_callback"),
+        ("lang|uk", "on_lang_callback"),
+    ):
+        assert first_callback_handler(app, data) == expected
