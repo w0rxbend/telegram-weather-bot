@@ -12,7 +12,7 @@ TOKEN = "123456:" + "A" * 35
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)  # no stray .env
-    for name in ("TG_BOT_TOKEN", "HTTP_TIMEOUT", "DATA_DIR"):
+    for name in ("TG_BOT_TOKEN", "HTTP_TIMEOUT", "DATA_DIR", "FORECAST_CACHE_TTL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
 
@@ -53,3 +53,15 @@ def test_admin_ids_parsed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("ADMIN_USER_IDS", "me")
     with pytest.raises(RuntimeError, match="ADMIN_USER_IDS"):
         load_settings()
+
+
+def test_forecast_cache_ttl_is_read_and_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-51: a bad value fails at startup with the variable's name, not at import."""
+    monkeypatch.setenv("TG_BOT_TOKEN", TOKEN)
+    assert load_settings().forecast_cache_ttl == 3600.0
+    monkeypatch.setenv("FORECAST_CACHE_TTL", "600")
+    assert load_settings().forecast_cache_ttl == 600.0
+    for bad in ("soon", "0", "nan"):
+        monkeypatch.setenv("FORECAST_CACHE_TTL", bad)
+        with pytest.raises(RuntimeError, match="FORECAST_CACHE_TTL"):
+            load_settings()
