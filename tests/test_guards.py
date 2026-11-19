@@ -217,3 +217,9 @@ async def test_forget_button_of_another_user_erases_nothing() -> None:
         query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
     drop.assert_not_called()
     message.edit_text.assert_not_awaited()
+
+
+async def test_unknown_button_is_answered() -> None:
+    query = SimpleNamespace(data="zz|1", answer=AsyncMock())
+    await bot.on_unknown_callback(SimpleNamespace(callback_query=query), SimpleNamespace())
+    query.answer.assert_awaited_once_with("This button has expired.")

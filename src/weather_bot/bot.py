@@ -973,6 +973,11 @@ async def on_slot_callback(update: Update, context: Context) -> None:
             raise
 
 
+async def on_unknown_callback(update: Update, context: Context) -> None:
+    """A button no handler recognises (older release, forged data): stop its spinner."""
+    await _callback(update).answer("This button has expired.")
+
+
 async def on_error(update: object, context: Context) -> None:
     update_id = update.update_id if isinstance(update, Update) else None
     user_id = (
@@ -1124,5 +1129,7 @@ def register_handlers(app: App) -> None:
             _guarded(extra.on_lang_callback), pattern=rf"^{extra.CB_LANG}\|(en|uk)$"
         )
     )
+    # last in the group, so it only sees callback data that matched nothing above
+    app.add_handler(CallbackQueryHandler(_guarded(on_unknown_callback)))
     app.add_handler(InlineQueryHandler(_guarded(extra.on_inline_query)))  # own limiter inside
     app.add_error_handler(on_error)
