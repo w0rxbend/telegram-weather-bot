@@ -41,7 +41,7 @@ from telegram import (
     ReplyKeyboardRemove,
     Update,
 )
-from telegram.constants import ChatAction, ParseMode
+from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     CallbackQueryHandler,
@@ -184,6 +184,25 @@ def _query_message(query: CallbackQuery) -> Message | None:
     return cast("Message", message)
 
 
+def _user_id(update: Update) -> int:
+    user = update.effective_user
+    if user is None:  # guarded handlers return before the callback for updates without a user
+        raise UnexpectedUpdateError("update has no user")
+    return user.id
+
+
+def _foreign_button(owner: int | None, user_id: int, message: Message) -> bool:
+    """True when a button was made for somebody else and must not act for ``user_id``.
+
+    Buttons act on the data of whoever presses them, so in a group one member's tap on
+    another member's list would change the wrong person's slots. Buttons made before owner
+    tags existed carry no owner; those are only honoured in a private chat.
+    """
+    if owner is not None:
+        return owner != user_id
+    return message.chat.type != ChatType.PRIVATE
+
+
 def _user_data(context: Context) -> dict[str, Any]:
     data = context.user_data
     if data is None:  # None only for updates without a user, which the filters exclude
@@ -262,7 +281,8 @@ def _caption(place: Place, fc: Forecast, kind: CardKind = "weather", lang: Lang 
     return build_caption(place.name, fc, lang=lang)
 
 
-def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]:
+def _locations_view(context: Context, owner_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """The slot list; its buttons are tagged with ``owner_id`` and work only for that user."""
     locs = store.list_locations(_user_data(context))
     if not locs:
         return (
@@ -279,13 +299,13 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
             [
                 InlineKeyboardButton(
                     f"🌤 {loc.slot} · {loc.label[:20]}",
-                    callback_data=f"{CB_WEATHER_SLOT}|{loc.index}",
+                    callback_data=f"{CB_WEATHER_SLOT}|{loc.index}|{owner_id}",
                 ),
                 InlineKeyboardButton(
                     "⭐" if not loc.is_default else "✓ default",
-                    callback_data=f"{CB_DEFAULT_SLOT}|{loc.index}",
+                    callback_data=f"{CB_DEFAULT_SLOT}|{loc.index}|{owner_id}",
                 ),
-                InlineKeyboardButton("🗑", callback_data=f"{CB_REMOVE_SLOT}|{loc.index}"),
+                InlineKeyboardButton("🗑", callback_data=f"{CB_REMOVE_SLOT}|{loc.index}|{owner_id}"),
             ]
         )
     lines.append("")
@@ -439,14 +459,14 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
 
 async def cmd_locations(update: Update, context: Context) -> None:
     message = _message(update)
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, _user_id(update))
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 def _slot_arg(context: Context) -> tuple[int | None, str]:
     """Parse ``/cmd N [rest]`` into a 0-based index and the remaining text."""
     args = context.args or []
-    if not args or not (args[0].isascii() and args[0].isdigit()):
+    if not args or not _is_number(args[0]):
         return None, " ".join(args[1:])
     return int(args[0]) - 1, " ".join(args[1:]).strip()
 
@@ -470,7 +490,7 @@ async def cmd_remove(update: Update, context: Context) -> None:
     if loc is None:
         await message.reply_text("Usage: /remove N – see /locations for slot numbers.")
         return
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, _user_id(update))
     await message.reply_text(
         f"🗑 Removed <b>{escape(loc.label)}</b>.\n\n{text}",
         parse_mode=ParseMode.HTML,
@@ -506,15 +526,17 @@ FORGET_PROMPT = (
     "Erase everything stored about you: saved locations, schedule, units and usage statistics? "
     "This cannot be undone."
 )
+NOT_YOUR_BUTTON = "This button belongs to someone else. Send the command yourself."
 FORGET_DONE = "Done. Everything stored about you has been erased. Send /start to begin again."
 
 
 async def cmd_forget(update: Update, context: Context) -> None:
+    owner = _user_id(update)
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🗑 Erase my data", callback_data=f"{CB_FORGET}|yes"),
-                InlineKeyboardButton("Cancel", callback_data=f"{CB_FORGET}|no"),
+                InlineKeyboardButton("🗑 Erase my data", callback_data=f"{CB_FORGET}|yes|{owner}"),
+                InlineKeyboardButton("Cancel", callback_data=f"{CB_FORGET}|no|{owner}"),
             ]
         ]
     )
@@ -525,10 +547,16 @@ async def on_forget_callback(update: Update, context: Context) -> None:
     query = _callback(update)
     user = update.effective_user
     message = _query_message(query)
-    await query.answer()
-    if user is None or message is None:
+    parsed = _parse_forget_callback(query.data)
+    if user is None or message is None or parsed is None:
+        await query.answer("This button has expired. Send /forget instead.")
         return
-    if (query.data or "").endswith("|yes"):
+    confirmed, owner = parsed
+    if _foreign_button(owner, user.id, message):
+        await query.answer(NOT_YOUR_BUTTON, show_alert=True)
+        return
+    await query.answer()
+    if confirmed:
         context.application.drop_user_data(user.id)  # memory now, persisted row on this update
         if (usage := runtime.telemetry()) is not None:
             await usage.forget_user(user.id)
@@ -795,12 +823,26 @@ def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
     return action, latitude, longitude
 
 
-def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
-    try:
-        action, index = (data or "").split("|")
-        return action, int(index)
-    except ValueError:
+def _is_number(text: str) -> bool:
+    return text.isascii() and text.isdigit()
+
+
+def _parse_slot_callback(data: str | None) -> tuple[str, int, int | None] | None:
+    """Split ``action|index[|owner id]``; the owner is None on buttons made before F-48."""
+    parts = (data or "").split("|")
+    if len(parts) not in (2, 3) or not all(_is_number(part) for part in parts[1:]):
         return None
+    return parts[0], int(parts[1]), int(parts[2]) if len(parts) == 3 else None
+
+
+def _parse_forget_callback(data: str | None) -> tuple[bool, int | None] | None:
+    """Split ``forget|yes|no[|owner id]`` into (confirmed, owner)."""
+    parts = (data or "").split("|")
+    if len(parts) not in (2, 3) or parts[1] not in ("yes", "no"):
+        return None
+    if len(parts) == 3 and not _is_number(parts[2]):
+        return None
+    return parts[1] == "yes", int(parts[2]) if len(parts) == 3 else None
 
 
 async def on_card_callback(update: Update, context: Context) -> None:
@@ -858,12 +900,17 @@ async def on_slot_callback(update: Update, context: Context) -> None:
     if parsed is None or message is None:
         await query.answer("This button has expired. Send /locations instead.")
         return
-    action, index = parsed
+    action, index, owner = parsed
+    user_id = _user_id(update)
 
-    if action == CB_LIST:
+    if action == CB_LIST:  # under every card: whoever taps it gets their own list
         await query.answer()
-        text, keyboard = _locations_view(context)
+        text, keyboard = _locations_view(context, user_id)
         await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return
+
+    if _foreign_button(owner, user_id, message):
+        await query.answer(NOT_YOUR_BUTTON, show_alert=True)
         return
 
     if action == CB_WEATHER_SLOT:
@@ -885,7 +932,7 @@ async def on_slot_callback(update: Update, context: Context) -> None:
         await query.answer()
         return
 
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, user_id)
     try:
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     except BadRequest as exc:

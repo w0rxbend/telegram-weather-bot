@@ -14,6 +14,10 @@ KYIV = Place(name="Kyiv, Ukraine", latitude=50.45, longitude=30.52)
 LVIV = Place(name="Lviv, Ukraine", latitude=49.84, longitude=24.03)
 
 
+USER_ID = 7
+OTHER_USER_ID = 8
+
+
 def make_context(user_data: dict | None = None, args: list[str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         user_data=user_data if user_data is not None else {},
@@ -31,7 +35,7 @@ def make_update(
     message.reply_text = AsyncMock()
     message.reply_photo = AsyncMock()
     message.chat.send_action = AsyncMock()
-    user = SimpleNamespace(first_name=first_name, language_code="en")
+    user = SimpleNamespace(id=USER_ID, first_name=first_name, language_code="en")
     return SimpleNamespace(effective_message=message, effective_user=user)
 
 
@@ -69,7 +73,13 @@ def test_keyboard_and_callback_parsing() -> None:
     assert kb.inline_keyboard[1][1].callback_data == "l|0"
     assert bot._parse_callback(refresh.callback_data) == ("r", 50.45, 30.52)
     assert bot._parse_callback("garbage") is None
-    assert bot._parse_slot_callback("d|2") == ("d", 2)
+    assert bot._parse_slot_callback("d|2") == ("d", 2, None)
+    assert bot._parse_slot_callback("d|2|7") == ("d", 2, 7)
+    assert bot._parse_slot_callback("d|2|x") is None
+    assert bot._parse_slot_callback("d|-1") is None
+    assert bot._parse_forget_callback("forget|yes|7") == (True, 7)
+    assert bot._parse_forget_callback("forget|no") == (False, None)
+    assert bot._parse_forget_callback("forget|maybe|7") is None
     assert bot._parse_slot_callback(None) is None
 
 
@@ -200,7 +210,7 @@ async def test_locations_list_default_remove_rename() -> None:
     text = update.effective_message.reply_text.await_args.args[0]
     assert "1. <b>Kyiv, Ukraine</b> ⭐" in text and "2. <b>Lviv, Ukraine</b>" in text
     keyboard = update.effective_message.reply_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[1][0].callback_data == "w|1"
+    assert keyboard.inline_keyboard[1][0].callback_data == "w|1|7"
 
     ctx.args = ["2"]
     await bot.cmd_default(update, ctx)
@@ -228,7 +238,12 @@ def make_query(data: str) -> MagicMock:
     query.message.reply_text = AsyncMock()
     query.message.reply_photo = AsyncMock()
     query.message.chat.send_action = AsyncMock()
+    query.message.chat.type = "private"
     return query
+
+
+def slot_update(query: MagicMock, user_id: int = USER_ID) -> SimpleNamespace:
+    return SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=user_id))
 
 
 async def test_refresh_callback_edits_media(forecast: Forecast) -> None:
@@ -292,22 +307,63 @@ async def test_slot_callbacks(forecast: Forecast) -> None:
     query = make_query("w|1")
     p1, p2 = patched(forecast)
     with p1 as fetch, p2:
-        await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+        await bot.on_slot_callback(slot_update(query), ctx)
     assert fetch.await_args.args[1:3] == (49.84, 24.03)
     query.message.reply_photo.assert_awaited_once()
 
     query = make_query("d|1")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     assert store.get_default(ctx.user_data).place == LVIV
     query.edit_message_text.assert_awaited_once()
 
     query = make_query("x|0")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     assert [loc.place for loc in store.list_locations(ctx.user_data)] == [LVIV]
 
     query = make_query("l|0")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     query.message.reply_text.assert_awaited_once()
+
+
+def _slot_buttons(ctx: SimpleNamespace, owner_id: int) -> dict[str, str]:
+    _, keyboard = bot._locations_view(ctx, owner_id)
+    return {
+        button.callback_data.split("|")[0]: button.callback_data
+        for button in keyboard.inline_keyboard[0]
+    }
+
+
+async def test_slot_buttons_only_work_for_the_user_they_were_made_for() -> None:
+    """F-48: in a group, a tap on someone else's list must not change the tapper's slots."""
+    ctx = make_context()  # the tapper's own data
+    store.add_location(ctx.user_data, KYIV)
+    store.add_location(ctx.user_data, LVIV)
+    buttons = _slot_buttons(ctx, owner_id=OTHER_USER_ID)
+    assert buttons == {"w": "w|0|8", "d": "d|0|8", "x": "x|0|8"}
+
+    for data in buttons.values():
+        query = make_query(data)
+        query.message.chat.type = "group"
+        await bot.on_slot_callback(slot_update(query, USER_ID), ctx)
+        query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
+        query.edit_message_text.assert_not_awaited()
+        query.message.reply_photo.assert_not_awaited()
+    assert [loc.place for loc in store.list_locations(ctx.user_data)] == [KYIV, LVIV]
+
+    query = make_query(_slot_buttons(ctx, owner_id=USER_ID)["x"])
+    query.message.chat.type = "group"
+    await bot.on_slot_callback(slot_update(query, USER_ID), ctx)
+    assert [loc.place for loc in store.list_locations(ctx.user_data)] == [LVIV]
+
+
+async def test_untagged_slot_buttons_only_work_in_a_private_chat() -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, KYIV)
+    query = make_query("x|0")  # a button sent before owner tags existed
+    query.message.chat.type = "supergroup"
+    await bot.on_slot_callback(slot_update(query), ctx)
+    query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
+    assert len(store.list_locations(ctx.user_data)) == 1
 
 
 async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
