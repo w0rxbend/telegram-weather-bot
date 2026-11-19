@@ -22,6 +22,7 @@ import contextlib
 import functools
 import logging
 import os
+import time
 import weakref
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
@@ -77,7 +78,8 @@ class UnexpectedUpdateError(RuntimeError):
 
 
 KEY_UNITS = "units"
-KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
+KEY_AWAITING = "awaiting_location"  # {"alias": str | None, "at": float} while /add waits
+PROMPT_TTL_SECONDS = 600.0  # an unanswered /add or "custom times" prompt is forgotten after this
 KEY_PLACES = "places"
 KEY_LANG_CODE = "lang_code"  # Telegram language_code, kept so background jobs can localise
 MAX_CACHED_PLACES = 5000
@@ -367,8 +369,9 @@ async def _send_card(
 
 
 async def _save_and_send(message: Message, context: Context, place: Place) -> None:
-    awaiting = _user_data(context).pop(KEY_AWAITING, None) or {}
-    alias = awaiting.get("alias") if isinstance(awaiting, dict) else None
+    prompt = _location_prompt(context) or {}
+    _user_data(context).pop(KEY_AWAITING, None)
+    alias = prompt.get("alias")
     try:
         loc, created = store.add_location(_user_data(context), place, alias)
     except ValueError as exc:
@@ -385,7 +388,35 @@ async def _save_and_send(message: Message, context: Context, place: Place) -> No
 
 
 def _ask_for_location(context: Context, alias: str | None = None) -> None:
-    _user_data(context)[KEY_AWAITING] = {"alias": alias or None}
+    _user_data(context)[KEY_AWAITING] = {"alias": alias or None, "at": time.time()}
+
+
+def _is_fresh(asked_at: object) -> bool:
+    """True for a prompt timestamp younger than ``PROMPT_TTL_SECONDS``.
+
+    Prompts stored before they carried a time (a bare ``True``, a dict without ``at``) count
+    as expired.
+    """
+    if isinstance(asked_at, bool) or not isinstance(asked_at, int | float):
+        return False
+    return 0 <= time.time() - asked_at < PROMPT_TTL_SECONDS
+
+
+def _location_prompt(context: Context) -> dict[str, Any] | None:
+    """The open /add or /start prompt; an expired one is dropped."""
+    prompt = _user_data(context).get(KEY_AWAITING)
+    if isinstance(prompt, dict) and _is_fresh(prompt.get("at")):
+        return prompt
+    _user_data(context).pop(KEY_AWAITING, None)
+    return None
+
+
+def _awaiting_times(context: Context) -> bool:
+    """True while the "custom times" prompt is open; an expired one is dropped."""
+    if _is_fresh(_user_data(context).get(sched.KEY_AWAITING_TIMES)):
+        return True
+    _user_data(context).pop(sched.KEY_AWAITING_TIMES, None)
+    return False
 
 
 # --- command handlers ---------------------------------------------------------------------
@@ -695,6 +726,8 @@ async def cmd_schedule(update: Update, context: Context) -> None:
         if error:
             await message.reply_text(error)
             return
+    # Plain /schedule is also the way out of the "custom times" prompt.
+    _user_data(context).pop(sched.KEY_AWAITING_TIMES, None)
     text, keyboard = _schedule_view(context)
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
@@ -708,7 +741,7 @@ async def on_schedule_callback(update: Update, context: Context) -> None:
         return
 
     if action == "custom":
-        _user_data(context)[sched.KEY_AWAITING_TIMES] = True
+        _user_data(context)[sched.KEY_AWAITING_TIMES] = time.time()
         await query.answer()
         await message.reply_text(
             "Send the times you want, separated by spaces, e.g. <code>7:30 13:00 19:00</code>",
@@ -744,7 +777,7 @@ async def _on_custom_times(message: Message, context: Context, text: str) -> Non
     try:
         times = sched.parse_times(text)
     except ValueError as exc:
-        await message.reply_text(f"{exc}\nOr send /schedule off to cancel.")
+        await message.reply_text(f"{exc}\nOr send /schedule to leave custom times.")
         return
     error = await _apply_schedule(message, context, times=times, preset="custom")
     if error:
@@ -781,7 +814,7 @@ async def on_text(update: Update, context: Context) -> None:
     if message.text is None:
         return
     query = message.text.strip()
-    if _user_data(context).get(sched.KEY_AWAITING_TIMES):
+    if _awaiting_times(context):
         await _on_custom_times(message, context, query)
         return
     if len(query) < 2 or len(query) > MAX_QUERY_LENGTH:
@@ -796,7 +829,7 @@ async def on_text(update: Update, context: Context) -> None:
         )
         return
 
-    setting_up = bool(_user_data(context).get(KEY_AWAITING)) or not store.list_locations(
+    setting_up = _location_prompt(context) is not None or not store.list_locations(
         _user_data(context)
     )
     if setting_up:
