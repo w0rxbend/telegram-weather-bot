@@ -13,7 +13,8 @@ machine-checked; reviewers enforce it.
   *Why:* hidden globals make tests order-dependent. (`runtime.py` and the forecast cache are
   existing exceptions.)
 - Settings are read once in `config.py`, typed, and validated at startup; never `os.getenv`
-  inside business code.
+  inside business code. (Existing exceptions: the optional `BOT_*` texts in `identity.py`,
+  and `health.py`, which runs as its own process.)
 
 ## Naming and size
 - Names say what a thing is: `due_times`, not `get_stuff`. Constants are `UPPER_SNAKE`, no
@@ -32,7 +33,7 @@ machine-checked; reviewers enforce it.
 - Every `create_task` keeps a reference and has a done-callback or an awaiting owner.
   *Why:* unreferenced tasks are garbage-collected mid-run and swallow exceptions.
 - Every outbound HTTP call has a timeout (set on the shared client) and a bounded retry.
-- Handlers that mutate `user_data` run serialized per user (see `bot._serialized`).
+- Handlers that mutate `user_data` run serialized per user (see `bot._guarded`).
 
 ## Errors and logging
 - No bare `except:`; `except Exception` only at a boundary (error handler, scheduler loop)
@@ -52,6 +53,13 @@ machine-checked; reviewers enforce it.
 - `callback_data` ≤ 64 bytes and is untrusted: parse defensively, range-check numbers
   (latitude −90…90, longitude −180…180), and fall back to "button expired".
 - Every callback query handler calls `query.answer()` on every path, including errors.
+  Callback data that matches no handler is answered by `bot.on_unknown_callback`.
+- A button that changes or deletes a user's data carries that user's id in its
+  `callback_data` and is refused for anyone else (`bot._foreign_button`). *Why:* in a group
+  everybody can tap it, and handlers act on the data of whoever taps.
+- State that waits for the user's next message (`awaiting_*`) stores the time it was asked
+  and expires (`bot.PROMPT_TTL_SECONDS`). *Why:* persisted flags otherwise capture a message
+  sent days later.
 - Handlers only react to `UpdateType.MESSAGE` (no edited messages, no channel posts).
 - Scheduled/bulk sends handle `RetryAfter` (sleep, one retry) and `Forbidden` (unsubscribe).
 - Interactive card requests are rate limited per user (`ratelimit.py`).
@@ -60,7 +68,7 @@ machine-checked; reviewers enforce it.
   rejected by Telegram ("message is too long") and the user only sees the generic error.
 - Parse upstream JSON defensively: check the shape (`isinstance`) before `.get`/indexing and
   turn a bad shape into the module's own error or fallback, never `AttributeError`/`KeyError`.
-- Authorization is by numeric user id, never username. (No admin commands exist today.)
+- Authorization is by numeric user id, never username (`ADMIN_USER_IDS`, `runtime.is_admin`).
 
 ## Security
 - Secrets come from the environment only; `.env` is git-ignored. Nothing secret in the image,
