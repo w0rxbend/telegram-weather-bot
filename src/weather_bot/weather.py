@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import httpx
 
-from weather_bot.httpcap import get_capped
+from weather_bot.httpcap import get_capped, parse_json
 from weather_bot.privacy import describe_error
 
 Units = Literal["metric", "imperial"]
@@ -252,7 +252,7 @@ async def fetch_forecast(
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue
             response.raise_for_status()
-            payload = response.json()
+            payload = parse_json(response)
             break
         except httpx.TransportError as exc:
             last_error = exc

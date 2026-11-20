@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from weather_bot.httpcap import get_capped
+from weather_bot.httpcap import get_capped, parse_json
 from weather_bot.privacy import describe_error
 from weather_bot.ratelimit import MinIntervalGate
 
@@ -71,7 +71,7 @@ async def reverse_geocode(
     try:
         response = await get_capped(client, NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()
-        data = response.json()
+        data = parse_json(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Reverse geocoding failed: %s", describe_error(exc))
         return fallback
@@ -101,7 +101,7 @@ async def search_place(
     try:
         response = await get_capped(client, OPEN_METEO_GEOCODE_URL, params=params)
         response.raise_for_status()
-        data = response.json()
+        data = parse_json(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Forward geocoding failed: %s", describe_error(exc))
         return None

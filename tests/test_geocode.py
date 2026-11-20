@@ -228,3 +228,11 @@ async def test_reverse_geocode_survives_unexpected_json(body: object) -> None:
 async def test_search_place_survives_unexpected_json(body: object) -> None:
     async with _client_answering(body) as client:
         assert await search_place(client, "Kyiv") is None
+
+
+async def test_search_place_ignores_a_hit_with_nan_coordinates() -> None:
+    # a NaN latitude used to become a saved place that every forecast request then failed on (F-53)
+    body = b'{"results": [{"name": "X", "latitude": NaN, "longitude": 24.03}]}'
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        assert await search_place(client, "X") is None
