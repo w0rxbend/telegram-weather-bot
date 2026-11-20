@@ -10,6 +10,7 @@ from telegram.ext import AIORateLimiter, ApplicationBuilder
 
 from weather_bot import runtime, scheduler
 from weather_bot.bot import make_post_init, post_shutdown, register_handlers
+from weather_bot.cache import forecast_cache
 from weather_bot.config import Settings, load_settings
 from weather_bot.legacy_state import import_pickle_state, quarantine_corrupt_state
 from weather_bot.persistence import SqlitePersistence
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 
 def build_application(settings: Settings, store: SqlitePersistence) -> App:
     """Wire the PTB application; separate from ``start`` so tests can build it without polling."""
+    forecast_cache().ttl = settings.forecast_cache_ttl
 
     def http_factory() -> httpx.AsyncClient:
         return httpx.AsyncClient(

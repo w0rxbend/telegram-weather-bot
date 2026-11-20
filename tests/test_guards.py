@@ -78,7 +78,7 @@ def _update(user_id: int = 1, *, callback: bool = False) -> SimpleNamespace:
     message = SimpleNamespace(reply_text=AsyncMock())
     query = SimpleNamespace(answer=AsyncMock()) if callback else None
     return SimpleNamespace(
-        effective_user=SimpleNamespace(id=user_id, language_code="en"),
+        effective_user=SimpleNamespace(id=user_id, language_code="en", username=None),
         effective_message=message,
         callback_query=query,
     )
@@ -104,6 +104,39 @@ async def test_guarded_rate_limit_answers_callbacks(monkeypatch: pytest.MonkeyPa
     await guarded(update, SimpleNamespace(user_data={}))
     await guarded(update, SimpleNamespace(user_data={}))
     update.callback_query.answer.assert_awaited_once_with(bot.RATE_LIMITED_TEXT, show_alert=True)
+
+
+async def test_guarded_drops_a_flood_without_running_or_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # cheap commands had no limit at all, and each one wrote a telemetry row (F-44)
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=2, window=60))
+    usage = AsyncMock()
+    runtime.set_telemetry(usage)
+    try:
+        handler = AsyncMock()
+        guarded = bot._guarded(handler)
+        update = _update()
+        for _ in range(4):
+            await guarded(update, SimpleNamespace(user_data={}))
+        other = _update(user_id=2)
+        await guarded(other, SimpleNamespace(user_data={}))
+    finally:
+        runtime.set_telemetry(None)
+    assert handler.await_count == 3  # two of user 1, one of user 2
+    assert usage.record_event.await_count == 3
+    update.effective_message.reply_text.assert_not_awaited()  # no reply to a flood
+
+
+async def test_guarded_flood_still_stops_the_button_spinner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=1, window=60))
+    guarded = bot._guarded(AsyncMock())
+    update = _update(callback=True)
+    await guarded(update, SimpleNamespace(user_data={}))
+    await guarded(update, SimpleNamespace(user_data={}))
+    update.callback_query.answer.assert_awaited_once_with()
 
 
 async def test_guarded_serializes_updates_of_one_user_but_not_across_users() -> None:
@@ -147,8 +180,8 @@ async def test_forget_erases_user_data_and_telemetry() -> None:
     usage = AsyncMock()
     runtime.set_telemetry(usage)
     try:
-        message = SimpleNamespace(edit_text=AsyncMock())
-        query = SimpleNamespace(data="forget|yes", answer=AsyncMock(), message=message)
+        message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="group"))
+        query = SimpleNamespace(data="forget|yes|7", answer=AsyncMock(), message=message)
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
         context = SimpleNamespace(
             application=SimpleNamespace(drop_user_data=user_gone), user_data={}
@@ -163,10 +196,30 @@ async def test_forget_erases_user_data_and_telemetry() -> None:
 
 async def test_forget_cancel_keeps_everything() -> None:
     drop = MagicMock()
-    message = SimpleNamespace(edit_text=AsyncMock())
-    query = SimpleNamespace(data="forget|no", answer=AsyncMock(), message=message)
+    message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="group"))
+    query = SimpleNamespace(data="forget|no|7", answer=AsyncMock(), message=message)
     update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
     context = SimpleNamespace(application=SimpleNamespace(drop_user_data=drop), user_data={})
     await bot.on_forget_callback(update, context)
     drop.assert_not_called()
     query.answer.assert_awaited_once()
+
+
+async def test_forget_button_of_another_user_erases_nothing() -> None:
+    """F-48: in a group, tapping someone else's "Erase my data" must not erase the tapper."""
+    drop = MagicMock()
+    message = SimpleNamespace(edit_text=AsyncMock(), chat=SimpleNamespace(type="group"))
+    for data in ("forget|yes|8", "forget|yes"):  # another user's button; an untagged old one
+        query = SimpleNamespace(data=data, answer=AsyncMock(), message=message)
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=7))
+        context = SimpleNamespace(application=SimpleNamespace(drop_user_data=drop), user_data={})
+        await bot.on_forget_callback(update, context)
+        query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
+    drop.assert_not_called()
+    message.edit_text.assert_not_awaited()
+
+
+async def test_unknown_button_is_answered() -> None:
+    query = SimpleNamespace(data="zz|1", answer=AsyncMock())
+    await bot.on_unknown_callback(SimpleNamespace(callback_query=query), SimpleNamespace())
+    query.answer.assert_awaited_once_with("This button has expired.")

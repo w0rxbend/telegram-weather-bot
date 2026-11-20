@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from weather_bot.sun import fmt_change, fmt_duration, sun_info
+import pytest
+
+from weather_bot.caption import build_caption, build_sun_caption
+from weather_bot.render.card import render_image
+from weather_bot.render.sun_card import render_sun_image
+from weather_bot.sun import NO_TIME, fmt_change, fmt_duration, sun_clock, sun_info
 from weather_bot.weather import Forecast, parse_forecast
 
 
@@ -62,3 +67,50 @@ def test_polar_edge_does_not_crash(forecast: Forecast) -> None:
     fc = replace(forecast, daily=[flat, *forecast.daily[1:]])
     info = sun_info(fc, datetime(2026, 10, 17, 12, 0))
     assert fmt_duration(info.daylight) == "0m"
+
+
+def _polar(forecast: Forecast, kind: str) -> Forecast:
+    """Days shaped as Open-Meteo reports them inside the polar circles (checked live)."""
+    length = timedelta(days=1) if kind == "day" else timedelta(0)
+    days = [replace(d, sunrise=d.date, sunset=d.date + length) for d in forecast.daily]
+    return replace(forecast, daily=days, yesterday=None)
+
+
+def test_polar_night_and_day_are_recognised(forecast: Forecast) -> None:
+    noon = datetime(2026, 10, 17, 12, 0)
+    assert sun_info(forecast, noon).polar is None
+
+    night = sun_info(_polar(forecast, "night"), noon)
+    assert night.polar == "night" and not night.is_day
+    assert night.progress == 0.0  # no part of the day arc is drawn as travelled
+    assert fmt_duration(night.daylight) == "0m"
+
+    day = sun_info(_polar(forecast, "day"), noon)
+    assert day.polar == "day" and day.is_day
+    assert day.daylight == timedelta(hours=24)
+
+
+def test_sun_clock_has_no_times_on_a_polar_day(forecast: Forecast) -> None:
+    assert sun_clock(forecast.today) == ("07:12", "17:59")
+    assert sun_clock(_polar(forecast, "night").today) == (NO_TIME, NO_TIME)
+    assert sun_clock(_polar(forecast, "day").today) == (NO_TIME, NO_TIME)
+
+
+@pytest.mark.parametrize("kind", ["night", "day"])
+def test_captions_do_not_invent_sun_times_in_polar_regions(forecast: Forecast, kind: str) -> None:
+    fc = _polar(forecast, kind)
+    noon = datetime(2026, 10, 17, 12, 0)
+    card, sun = build_caption("Longyearbyen", fc), build_sun_caption("Longyearbyen", fc, now=noon)
+    for caption in (card, sun):
+        assert f"Polar {kind}" in caption
+        assert "00:00" not in caption
+    assert "Golden hour" not in sun and " in " not in sun.split("\n")[1]
+    assert "Полярн" in build_caption("Longyearbyen", fc, lang="uk")
+
+
+@pytest.mark.parametrize("kind", ["night", "day"])
+def test_cards_render_in_polar_regions(forecast: Forecast, kind: str) -> None:
+    fc = _polar(forecast, kind)
+    noon = datetime(2026, 10, 17, 12, 0)
+    assert render_image(fc, "Longyearbyen", now=noon).size[0] > 0
+    assert render_sun_image(fc, "Longyearbyen", now=noon).size[0] > 0
