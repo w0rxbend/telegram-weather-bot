@@ -68,6 +68,8 @@ machine-checked; reviewers enforce it.
   rejected by Telegram ("message is too long") and the user only sees the generic error.
 - Parse upstream JSON defensively: check the shape (`isinstance`) before `.get`/indexing and
   turn a bad shape into the module's own error or fallback, never `AttributeError`/`KeyError`.
+- Decode upstream bodies with `httpcap.parse_json`, not `response.json()`. *Why:* `json`
+  accepts `NaN`/`Infinity`/`1e999`, which pass `float()` and crash `round()` in a handler.
 - Authorization is by numeric user id, never username (`ADMIN_USER_IDS`, `runtime.is_admin`).
 
 ## Security
