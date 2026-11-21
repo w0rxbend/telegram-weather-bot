@@ -21,6 +21,9 @@ machine-checked; reviewers enforce it.
   magic numbers inline — name them (`MAX_LOCATIONS`, `INTERVAL`).
 - Functions do one thing and fit on a screen (~40 lines); nesting ≤ 3 levels. **(review)**
 - No dead code, no commented-out code, no `TODO` without a finding/issue id.
+- Compare local times as UTC instants (`schedule.slot_instant`), not wall-clock minutes.
+  *Why:* daylight-saving jumps skip or repeat local times; minute arithmetic missed a
+  spring-forward slot (F-54).
 
 ## Typing
 - `mypy --strict` must pass; every function is fully annotated. Prefer `dataclass(frozen=True)`
