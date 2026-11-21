@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -83,3 +83,41 @@ def test_unknown_timezone_falls_back_to_utc() -> None:
     data: dict = {}
     s = sched.set_schedule(data, times=["10:00"], preset="x", tz="Mars/Olympus", chat_id=1)
     assert str(s.zone) == "UTC"
+
+
+def test_parse_times_error_echoes_a_capped_token() -> None:
+    # a 4096-character message echoed whole made the reply too long for Telegram (F-40)
+    with pytest.raises(ValueError, match="is not a time") as caught:
+        sched.parse_times("x" * 4096)
+    assert len(str(caught.value)) < 100
+    with pytest.raises(ValueError, match="“noon” is not a time"):
+        sched.parse_times("noon")
+
+
+def _fire_over(data: dict, start: datetime, hours: int) -> list[datetime]:
+    """Run the scheduler's due/mark cycle every 30 s, like the tick loop does."""
+    fired = []
+    for step in range(hours * 120):
+        now = start + timedelta(seconds=30 * step)
+        for slot in sched.due_times(data, now):
+            sched.mark_sent(data, now, slot)
+            fired.append(now)
+    return fired
+
+
+def test_slot_in_spring_forward_gap_fires_after_the_jump() -> None:
+    # New York, 2027-03-14: 02:00 EST jumps to 03:00 EDT, so 02:30 never happens on the clock.
+    data: dict = {}
+    sched.set_schedule(data, times=["02:30"], preset="custom", tz="America/New_York", chat_id=1)
+    fired = _fire_over(data, utc(2027, 3, 14, 5, 0), hours=6)
+    assert fired == [utc(2027, 3, 14, 7, 30)]  # 03:30 EDT, once
+    nxt = sched.get_schedule(data).next_run(utc(2027, 3, 13, 12, 0))  # type: ignore[union-attr]
+    assert nxt is not None and (nxt.hour, nxt.minute) == (3, 30)
+
+
+def test_slot_in_repeated_autumn_hour_fires_once() -> None:
+    # New York, 2027-11-07: 01:00-02:00 happens twice (EDT, then EST).
+    data: dict = {}
+    sched.set_schedule(data, times=["01:30"], preset="custom", tz="America/New_York", chat_id=1)
+    fired = _fire_over(data, utc(2027, 11, 7, 4, 0), hours=4)
+    assert fired == [utc(2027, 11, 7, 5, 30)]  # first occurrence (EDT)

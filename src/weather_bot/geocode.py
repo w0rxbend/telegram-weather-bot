@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from weather_bot.httpcap import get_capped
+from weather_bot.httpcap import get_capped, parse_json
 from weather_bot.privacy import describe_error
 from weather_bot.ratelimit import MinIntervalGate
 
@@ -71,19 +71,21 @@ async def reverse_geocode(
     try:
         response = await get_capped(client, NOMINATIM_REVERSE_URL, params=params, headers=headers)
         response.raise_for_status()
-        data = response.json()
+        data = parse_json(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Reverse geocoding failed: %s", describe_error(exc))
         return fallback
 
-    address = data.get("address") or {}
+    address = data.get("address") if isinstance(data, dict) else None
+    if not isinstance(address, dict):  # error replies and odd payloads carry no address
+        return fallback
     locality = _pick_locality(address)
     country = address.get("country")
     if locality and country and locality != country:
         name = f"{locality}, {country}"
     else:
         name = locality or country or data.get("name") or fallback.name
-    return Place(name=name, latitude=latitude, longitude=longitude)
+    return Place(name=str(name), latitude=latitude, longitude=longitude)
 
 
 async def search_place(
@@ -99,25 +101,32 @@ async def search_place(
     try:
         response = await get_capped(client, OPEN_METEO_GEOCODE_URL, params=params)
         response.raise_for_status()
-        data = response.json()
+        data = parse_json(response)
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("Forward geocoding failed: %s", describe_error(exc))
         return None
 
-    results = data.get("results") or []
-    if not results:
+    results = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(results, list) or not results:
         return None
-    hit = results[0]
+    return _place_from_hit(results[0])
+
+
+def _place_from_hit(hit: object) -> Place | None:
+    """Build a place from one search result; ``None`` when it is not shaped as documented."""
+    if not isinstance(hit, dict):
+        return None
+    try:
+        latitude, longitude = float(hit["latitude"]), float(hit["longitude"])
+    except (KeyError, TypeError, ValueError):
+        log.warning("Forward geocoding returned a result without usable coordinates")
+        return None
     parts = [hit.get("name")]
     if hit.get("admin1") and hit.get("admin1") != hit.get("name"):
         parts.append(hit["admin1"])
     if hit.get("country"):
         parts.append(hit["country"])
-    return Place(
-        name=", ".join(p for p in parts if p),
-        latitude=float(hit["latitude"]),
-        longitude=float(hit["longitude"]),
-    )
+    return Place(name=", ".join(str(p) for p in parts if p), latitude=latitude, longitude=longitude)
 
 
 SEARCH_CACHE_TTL = 3600.0  # city -> coordinates changes about never; an hour keeps the data fresh
