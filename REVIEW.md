@@ -70,6 +70,7 @@
 | F-51 | Low | `cache.py:24` | `FORECAST_CACHE_TTL` was parsed with `float()` at import time, outside `config.py`: a typo crashed with a bare `ValueError`, and `nan` or a negative value switched the cache off without a word | A `Settings` field validated like `HTTP_TIMEOUT`, applied in `main.build_application` | Fixed (2026-11-19) | 210202a |
 | F-52 | Low | `Dockerfile:12,34` | The image installs from `poetry export --without-hashes`, so pip does not check the downloaded packages against the hashes in `poetry.lock` | Export with hashes and `pip install --require-hashes` | **Deferred** (could not be tested here, see below) | — |
 | F-53 | Low | `weather.py:255`, `airquality.py:63`, `geocode.py:74,104` | `response.json()` accepts `NaN`, `Infinity` and `1e999` (inf). They passed `float()` in the parsers, then `round()` raised `ValueError`/`OverflowError` in `build_caption` and `AirQuality` outside the `WeatherError` handling, so the user got the generic error. A NaN coordinate from geocoding became a saved place | `httpcap.parse_json` raises `ValueError` on non-finite numbers and integers above 2**63; all four calls use it and take the existing invalid-JSON path | Fixed (2026-11-20) | 102f9e2 |
+| F-54 | Low | `schedule.py` `due_times`, `Schedule.next_run` (lines at 49f0359: :194-206, :79-95) | Slots were compared as wall-clock minutes. A time the clock skips on a spring-forward night (02:30 in `America/New_York` on 2027-03-14) never matched, so that day's card was not sent; `/schedule` showed the non-existent time as the next card | `schedule.slot_instant` compares UTC instants: a skipped time is sent just after the jump (03:30 local), a repeated autumn time once, at its first occurrence | Fixed (2026-11-21) | edc99fd |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -323,3 +324,28 @@ Branch is `claude/dazzling-heisenberg-38ti24` (environment-assigned), not `chore
 - Not run: Docker build, Trivy, GitHub Actions (before the push), live Telegram.
 
 Branch is `claude/dazzling-heisenberg-ayzcrx` (environment-assigned), not `chore/review-hardening-2026-11-20`.
+
+## Review pass (2026-11-21)
+`main` (b2b5974) has not changed since the 2026-11-20 pass, and none of the review pull requests (#91, #92, #98, #99, #100, #101) has been merged. This pass is built on the #101 branch (49f0359), so it contains F-39 to F-53 and adds one fix. Question not asked before: what happens to scheduled cards when the clock jumps (daylight saving) or crosses midnight. It re-read `schedule.py` and the `tick` path of `scheduler.py`.
+
+- Baseline on `main` (b2b5974), Python 3.11.18: `poetry run pytest -q` 304 passed; `poetry run ruff check src tests scripts` and `poetry run ruff format --check src tests scripts` clean; `poetry run mypy` strict clean (36 files); `poetry run bandit -q -c pyproject.toml -r src` rc 0; `poetry run pip-audit -r <pins from poetry show --with dev> --no-deps --disable-pip` (58 packages): no known vulnerabilities.
+- Baseline on the #101 tip (49f0359): 355 passed; the other commands clean; `poetry run pre-commit run --all-files` passes.
+- Final: 357 passed (2 new); ruff, ruff format, mypy (36 files), bandit clean; pip-audit: no known vulnerabilities (lock unchanged).
+- New finding: F-54 (Low), fixed. A probe that ran the due/mark cycle every 30 s through 2027-03-14 in New York got no send for a 02:30 slot; the new gap test fails without the fix (checked by stashing `schedule.py`) and passes with it. A second test pins the autumn behaviour (one send, first occurrence), which was already right.
+- Token-pattern scan of tracked files: no matches.
+
+### Behaviour change
+- On a spring-forward day, a card scheduled inside the skipped hour arrives one hour late instead of not at all. Nothing else changes: the 10-minute grace window and the once-per-day mark work as before.
+
+### Checked and left as it is
+- The grace window does not cross midnight: a 23:55 slot whose send was missed because the bot was down until 00:02 is not sent late (probe: `due_times` returns `[]` at 00:02). Fixing it needs the "already sent" mark to hold two dates, which changes the stored format. A missed late-evening card after a restart is minor, so this is not changed.
+
+### Open pull requests
+- Merging this pass's pull request makes #91, #92, #98, #99, #100 and #101 redundant (it contains #91, #98, #100 and #101 unchanged). #92 and #99 have two commits each that are not here; they are alternative fixes of the rain-alert problem that F-41 fixes.
+- Dependabot #93 to #97, #102 and #103 were not reviewed. The note about #95 (`python:3.15-slim`) still applies.
+
+### Assumptions and uncertainties
+- How many users have a slot between 02:00 and 03:00 is not known; the presets do not include one, so only custom times are affected.
+- Not run: Docker build, Trivy, GitHub Actions (before the push), live Telegram.
+
+Branch is `claude/dazzling-heisenberg-oxjx7a` (environment-assigned), not `chore/review-hardening-2026-11-21`.
