@@ -271,6 +271,8 @@ async def fetch_forecast(
     else:  # pragma: no cover - loop always breaks or raises
         raise WeatherError(f"Open-Meteo request failed: {last_error}")
 
+    if not isinstance(payload, dict):
+        raise WeatherError("Open-Meteo returned an unexpected payload")
     if "error" in payload and payload.get("error"):
         raise WeatherError(payload.get("reason", "Open-Meteo returned an error"))
 

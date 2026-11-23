@@ -153,3 +153,12 @@ async def test_fetch_forecast_rejects_oversized_body(payload: dict) -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(WeatherError):
             await fetch_forecast(client, 1.0, 2.0)
+
+
+@pytest.mark.parametrize("body", [[], "busy", 7])
+async def test_fetch_forecast_rejects_json_that_is_not_an_object(body: object) -> None:
+    # used to raise AttributeError instead of WeatherError (F-42)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(WeatherError, match="unexpected payload"):
+            await fetch_forecast(client, 50.45, 30.52)

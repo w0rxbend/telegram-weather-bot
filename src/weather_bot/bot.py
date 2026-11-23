@@ -326,7 +326,7 @@ async def _send_card(
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Forecast failed for %s: %s", place.name, exc)
+        log.warning("Forecast failed: %s", exc)  # no place name: alias or coordinates
         await message.reply_text(
             tr(_lang(context), "weather_down"),
             reply_markup=ReplyKeyboardRemove() if intro else None,
@@ -823,7 +823,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Refresh failed for %s: %s", place.name, exc)
+        log.warning("Refresh failed: %s", exc)  # no place name: alias or coordinates
         # The query was answered above and Telegram rejects a second answer, so tell the
         # user in the chat instead.
         await message.reply_text("Weather service is unavailable right now, try again shortly.")
@@ -933,6 +933,8 @@ async def post_shutdown(app: App) -> None:
 
 _user_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 _card_limiter = RateLimiter()
+UPDATES_PER_MINUTE = 60  # every guarded update of one user: commands, buttons, inline queries
+_update_limiter = RateLimiter(limit=UPDATES_PER_MINUTE)
 RATE_LIMITED_TEXT = "You're asking for cards too fast. Please wait a minute and try again."
 
 Handler = Callable[[Update, Context], Coroutine[Any, Any, None]]
@@ -940,6 +942,9 @@ Handler = Callable[[Update, Context], Coroutine[Any, Any, None]]
 
 def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
     """Run ``callback`` one update at a time per user, optionally rate limited.
+
+    Every guarded update counts against ``UPDATES_PER_MINUTE``; ``rate_limited`` adds the
+    much tighter card budget on top.
 
     PTB runs updates concurrently; two quick taps from one user would otherwise interleave
     their read-modify-write of ``user_data`` (slots, schedule).
@@ -949,6 +954,12 @@ def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
     async def wrapper(update: Update, context: Context) -> None:
         user = update.effective_user
         if user is None:
+            return
+        if not _update_limiter.allow(user.id):
+            # A flood: drop it without a reply, a telemetry row or a lock. Only a button gets
+            # an (empty) answer, so its spinner stops.
+            if update.callback_query:
+                await update.callback_query.answer()
             return
         if rate_limited and not _card_limiter.allow(user.id):
             if update.callback_query:

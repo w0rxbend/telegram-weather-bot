@@ -78,7 +78,7 @@ def _update(user_id: int = 1, *, callback: bool = False) -> SimpleNamespace:
     message = SimpleNamespace(reply_text=AsyncMock())
     query = SimpleNamespace(answer=AsyncMock()) if callback else None
     return SimpleNamespace(
-        effective_user=SimpleNamespace(id=user_id, language_code="en"),
+        effective_user=SimpleNamespace(id=user_id, language_code="en", username=None),
         effective_message=message,
         callback_query=query,
     )
@@ -104,6 +104,39 @@ async def test_guarded_rate_limit_answers_callbacks(monkeypatch: pytest.MonkeyPa
     await guarded(update, SimpleNamespace(user_data={}))
     await guarded(update, SimpleNamespace(user_data={}))
     update.callback_query.answer.assert_awaited_once_with(bot.RATE_LIMITED_TEXT, show_alert=True)
+
+
+async def test_guarded_drops_a_flood_without_running_or_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # cheap commands had no limit at all, and each one wrote a telemetry row (F-44)
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=2, window=60))
+    usage = AsyncMock()
+    runtime.set_telemetry(usage)
+    try:
+        handler = AsyncMock()
+        guarded = bot._guarded(handler)
+        update = _update()
+        for _ in range(4):
+            await guarded(update, SimpleNamespace(user_data={}))
+        other = _update(user_id=2)
+        await guarded(other, SimpleNamespace(user_data={}))
+    finally:
+        runtime.set_telemetry(None)
+    assert handler.await_count == 3  # two of user 1, one of user 2
+    assert usage.record_event.await_count == 3
+    update.effective_message.reply_text.assert_not_awaited()  # no reply to a flood
+
+
+async def test_guarded_flood_still_stops_the_button_spinner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=1, window=60))
+    guarded = bot._guarded(AsyncMock())
+    update = _update(callback=True)
+    await guarded(update, SimpleNamespace(user_data={}))
+    await guarded(update, SimpleNamespace(user_data={}))
+    update.callback_query.answer.assert_awaited_once_with()
 
 
 async def test_guarded_serializes_updates_of_one_user_but_not_across_users() -> None:

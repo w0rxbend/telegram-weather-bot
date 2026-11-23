@@ -12,6 +12,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 import sqlite3
 import stat
 import threading
@@ -33,6 +34,15 @@ EXPORT_ROW_LIMIT = 200_000  # newest rows; keeps the CSV under Telegram's upload
 SECONDS_PER_DAY = 86_400
 LOG_RETENTION_DAYS = 90  # raw event_log rows older than this are deleted (F-34)
 ALIAS_SEPARATOR = " · "  # SavedLocation.card_name is "<alias> · <place>"
+UNNAMED_PLACE = "(unnamed place)"
+# A place without a name is labelled with its coordinates ("50.450, 30.523") on the card.
+_COORDINATES = re.compile(r"-?\d{1,3}\.\d+, -?\d{1,3}\.\d+")
+_MERGE_CITY = (
+    "INSERT INTO cities (user_id, city, count, last_seen) "
+    "SELECT user_id, ?, count, last_seen FROM cities WHERE city = ? "
+    "ON CONFLICT(user_id, city) DO UPDATE SET count = count + excluded.count, "
+    "last_seen = MAX(last_seen, excluded.last_seen)"
+)
 
 _FORGET_STATEMENTS = (
     "DELETE FROM users WHERE user_id = ?",
@@ -77,8 +87,13 @@ def _csv_safe(value: str) -> str:
 
 
 def city_label(place_name: str) -> str:
-    """The real place from a card name, without the user's private slot alias."""
-    return place_name.rsplit(ALIAS_SEPARATOR, 1)[-1].strip()[:MAX_CITY_LENGTH]
+    """The real place from a card name, without the user's private slot alias.
+
+    Coordinates are personal data and never a city, so a place that is only known by them
+    is counted as ``UNNAMED_PLACE``.
+    """
+    label = place_name.rsplit(ALIAS_SEPARATOR, 1)[-1].strip()[:MAX_CITY_LENGTH]
+    return UNNAMED_PLACE if _COORDINATES.fullmatch(label) else label
 
 
 class UsageTelemetry:
@@ -107,6 +122,21 @@ class UsageTelemetry:
             CREATE INDEX IF NOT EXISTS event_log_user ON event_log (user_id, ts);
             """
         )
+        self._scrub_coordinates()
+
+    def _scrub_coordinates(self) -> None:
+        """Relabel coordinates stored as a city by versions before F-39; counts are kept."""
+        stored = self._db.execute(
+            "SELECT city FROM cities UNION SELECT city FROM event_log WHERE city IS NOT NULL"
+        ).fetchall()
+        for (city,) in stored:
+            if not _COORDINATES.fullmatch(city):
+                continue
+            self._write(
+                (_MERGE_CITY, (UNNAMED_PLACE, city)),
+                ("DELETE FROM cities WHERE city = ?", (city,)),
+                ("UPDATE event_log SET city = ? WHERE city = ?", (UNNAMED_PLACE, city)),
+            )
 
     # --- synchronous writes (run in a worker thread) --------------------------------------
 

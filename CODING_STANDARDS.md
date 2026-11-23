@@ -44,6 +44,8 @@ machine-checked; reviewers enforce it.
   log.error("bad update %s", update)  # bad: dumps text + location
   log.error("update %s failed", update.update_id)  # good
   ```
+- A place name is personal data: it can be a user's slot alias, or coordinates when
+  geocoding failed. Do not log it; telemetry stores it only through `telemetry.city_label`.
 
 ## Telegram rules
 - All user text echoed with `parse_mode=HTML` goes through `html.escape`.
@@ -53,6 +55,11 @@ machine-checked; reviewers enforce it.
 - Handlers only react to `UpdateType.MESSAGE` (no edited messages, no channel posts).
 - Scheduled/bulk sends handle `RetryAfter` (sleep, one retry) and `Forbidden` (unsubscribe).
 - Interactive card requests are rate limited per user (`ratelimit.py`).
+- Echo at most a short, capped piece of user input in a reply (`MAX_QUERY_LENGTH`,
+  `schedule.MAX_ECHO`). *Why:* a 4096-character message echoed inside a longer sentence is
+  rejected by Telegram ("message is too long") and the user only sees the generic error.
+- Parse upstream JSON defensively: check the shape (`isinstance`) before `.get`/indexing and
+  turn a bad shape into the module's own error or fallback, never `AttributeError`/`KeyError`.
 - Authorization is by numeric user id, never username. (No admin commands exist today.)
 
 ## Security
@@ -61,6 +68,8 @@ machine-checked; reviewers enforce it.
 - Validate every user-supplied value: length, charset (strip control characters), range.
 - No `pickle` of external data, `eval`, `exec`, `shell=True`.
 - Dependencies are pinned by `poetry.lock`; `pip-audit` must be clean before merging.
+- Hook versions in `.pre-commit-config.yaml` follow the versions in `poetry.lock`, so a local
+  run and CI agree.
 - The container runs as non-root with a read-only root filesystem.
 
 ## Testing

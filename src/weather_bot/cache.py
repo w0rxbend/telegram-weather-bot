@@ -89,7 +89,9 @@ class ForecastCache:
             forecast = await fetch_forecast(client, key[0], key[1], units)
         except WeatherError as exc:
             if entry and now - entry.fetched_at < STALE_TTL:
-                log.warning("Serving stale forecast for %s after error: %s", key, exc)
+                log.warning(
+                    "Serving stale forecast for %.1f, %.1f after error: %s", key[0], key[1], exc
+                )
                 future.set_result(entry.forecast)
                 return entry.forecast
             self._fail(future, exc)
