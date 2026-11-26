@@ -1,7 +1,8 @@
 """In-memory forecast cache: one Open-Meteo call per place, per units, per hour.
 
 * Coordinates are rounded to two decimals (~1 km), so nearby requests share an entry.
-* Entries are fresh for ``ttl`` seconds (default one hour, ``FORECAST_CACHE_TTL`` env).
+* Entries are fresh for ``ttl`` seconds (default one hour; ``config.py`` reads
+  ``FORECAST_CACHE_TTL`` and ``main.py`` applies it).
 * Concurrent requests for the same key are coalesced into a single API call.
 * If the API fails and a stale entry (< ``stale_ttl``) exists, that entry is served instead.
 """
@@ -10,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -21,7 +21,7 @@ from weather_bot.weather import Forecast, Units, WeatherError, fetch_forecast
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TTL = float(os.getenv("FORECAST_CACHE_TTL", "3600"))
+DEFAULT_TTL = 3600.0
 STALE_TTL = 6 * 3600
 MAX_ENTRIES = 5000
 KEY_PRECISION = 2  # decimals of latitude/longitude

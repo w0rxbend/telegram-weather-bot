@@ -57,7 +57,12 @@ async def scheduler_loop(
         except Exception:
             log.exception("Rain alert tick failed")
         if heartbeat is not None:
-            health.beat(heartbeat)
+            try:
+                health.beat(heartbeat)
+            except OSError as exc:
+                # A full or read-only data volume must not end the loop: cards and alerts
+                # keep going, and the stale file is what turns the healthcheck red.
+                log.warning("Could not write the heartbeat file: %s", exc)
         await asyncio.sleep(interval)
 
 

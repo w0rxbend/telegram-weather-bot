@@ -9,7 +9,8 @@ RUN pip install "poetry>=2.0,<3" poetry-plugin-export
 
 WORKDIR /build
 COPY pyproject.toml poetry.lock ./
-RUN poetry export -f requirements.txt --without-hashes -o requirements.txt
+# With hashes, so the runtime stage installs exactly the files poetry.lock names.
+RUN poetry export -f requirements.txt -o requirements.txt
 
 
 # ---- runtime -------------------------------------------------------------------------------
@@ -31,7 +32,7 @@ WORKDIR /app
 COPY --from=builder /build/requirements.txt ./requirements.txt
 # pip is not needed at runtime, and its vendored copies of certifi, urllib3, msgpack and
 # setuptools are what the Trivy gate in docker-ci.yml flags; drop it once the deps are in.
-RUN pip install -r requirements.txt \
+RUN pip install --require-hashes -r requirements.txt \
     && pip uninstall -y pip
 
 COPY src/ ./src

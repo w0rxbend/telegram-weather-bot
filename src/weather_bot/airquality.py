@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from weather_bot.httpcap import get_capped
+from weather_bot.httpcap import get_capped, parse_json
 from weather_bot.i18n import Lang, tr
 from weather_bot.privacy import describe_error
 from weather_bot.weather import WeatherError
@@ -60,7 +60,7 @@ async def fetch_air_quality(
     try:
         response = await get_capped(client, AIR_QUALITY_URL, params=params)
         response.raise_for_status()
-        payload = response.json()
+        payload = parse_json(response)
     except httpx.HTTPError as exc:
         raise WeatherError(f"Air quality request failed: {describe_error(exc)}") from None
     except ValueError as exc:
