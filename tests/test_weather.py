@@ -162,3 +162,18 @@ async def test_fetch_forecast_rejects_json_that_is_not_an_object(body: object) -
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(WeatherError, match="unexpected payload"):
             await fetch_forecast(client, 50.45, 30.52)
+
+
+@pytest.mark.parametrize("value", ["NaN", "1e999"])
+async def test_fetch_forecast_rejects_non_finite_numbers(payload: dict, value: str) -> None:
+    # parsed as nan/inf, then build_caption's round() raised in the handler (F-53)
+    body = json.dumps(payload).replace(
+        f'"temperature_2m": {json.dumps(payload["current"]["temperature_2m"])}',
+        f'"temperature_2m": {value}',
+        1,
+    )
+    assert value in body
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body.encode()))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(WeatherError, match="invalid JSON"):
+            await fetch_forecast(client, 50.45, 30.52)

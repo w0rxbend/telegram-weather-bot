@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +13,10 @@ from weather_bot.weather import Forecast, WeatherError
 
 KYIV = Place(name="Kyiv, Ukraine", latitude=50.45, longitude=30.52)
 LVIV = Place(name="Lviv, Ukraine", latitude=49.84, longitude=24.03)
+
+
+USER_ID = 7
+OTHER_USER_ID = 8
 
 
 def make_context(user_data: dict | None = None, args: list[str] | None = None) -> SimpleNamespace:
@@ -31,7 +36,7 @@ def make_update(
     message.reply_text = AsyncMock()
     message.reply_photo = AsyncMock()
     message.chat.send_action = AsyncMock()
-    user = SimpleNamespace(first_name=first_name, language_code="en")
+    user = SimpleNamespace(id=USER_ID, first_name=first_name, language_code="en")
     return SimpleNamespace(effective_message=message, effective_user=user)
 
 
@@ -69,7 +74,13 @@ def test_keyboard_and_callback_parsing() -> None:
     assert kb.inline_keyboard[1][1].callback_data == "l|0"
     assert bot._parse_callback(refresh.callback_data) == ("r", 50.45, 30.52)
     assert bot._parse_callback("garbage") is None
-    assert bot._parse_slot_callback("d|2") == ("d", 2)
+    assert bot._parse_slot_callback("d|2") == ("d", 2, None)
+    assert bot._parse_slot_callback("d|2|7") == ("d", 2, 7)
+    assert bot._parse_slot_callback("d|2|x") is None
+    assert bot._parse_slot_callback("d|-1") is None
+    assert bot._parse_forget_callback("forget|yes|7") == (True, 7)
+    assert bot._parse_forget_callback("forget|no") == (False, None)
+    assert bot._parse_forget_callback("forget|maybe|7") is None
     assert bot._parse_slot_callback(None) is None
 
 
@@ -77,7 +88,7 @@ async def test_start_without_location_asks_for_it() -> None:
     ctx = make_context()
     update = make_update()
     await bot.cmd_start(update, ctx)
-    assert ctx.user_data["awaiting_location"] == {"alias": None}
+    assert ctx.user_data["awaiting_location"]["alias"] is None
     kwargs = update.effective_message.reply_text.await_args.kwargs
     assert kwargs["reply_markup"] is bot.LOCATION_KEYBOARD
     assert "Ann" in update.effective_message.reply_text.await_args.args[0]
@@ -130,7 +141,7 @@ async def test_unknown_slot_reply_does_not_echo_unbounded_text() -> None:
 
 
 async def test_location_message_adds_slot_and_replies(forecast: Forecast) -> None:
-    ctx = make_context({"awaiting_location": {"alias": "home"}})
+    ctx = make_context({"awaiting_location": {"alias": "home", "at": time.time()}})
     update = make_update(location=SimpleNamespace(latitude=50.45, longitude=30.52))
     p1, p2 = patched(forecast)
     with patch.object(bot, "reverse_geocode", AsyncMock(return_value=KYIV)), p1, p2:
@@ -159,7 +170,7 @@ async def test_second_location_is_not_default(forecast: Forecast) -> None:
     ctx.args = ["office"]
     update = make_update()
     await bot.cmd_add(update, ctx)
-    assert ctx.user_data["awaiting_location"] == {"alias": "office"}
+    assert ctx.user_data["awaiting_location"]["alias"] == "office"
     update = make_update(text="Lviv")
     p1, p2 = patched(forecast)
     with patch.object(bot, "search_place", AsyncMock(return_value=LVIV)), p1, p2:
@@ -200,7 +211,7 @@ async def test_locations_list_default_remove_rename() -> None:
     text = update.effective_message.reply_text.await_args.args[0]
     assert "1. <b>Kyiv, Ukraine</b> ⭐" in text and "2. <b>Lviv, Ukraine</b>" in text
     keyboard = update.effective_message.reply_text.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[1][0].callback_data == "w|1"
+    assert keyboard.inline_keyboard[1][0].callback_data == "w|1|7"
 
     ctx.args = ["2"]
     await bot.cmd_default(update, ctx)
@@ -228,7 +239,12 @@ def make_query(data: str) -> MagicMock:
     query.message.reply_text = AsyncMock()
     query.message.reply_photo = AsyncMock()
     query.message.chat.send_action = AsyncMock()
+    query.message.chat.type = "private"
     return query
+
+
+def slot_update(query: MagicMock, user_id: int = USER_ID) -> SimpleNamespace:
+    return SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=user_id))
 
 
 async def test_refresh_callback_edits_media(forecast: Forecast) -> None:
@@ -292,22 +308,63 @@ async def test_slot_callbacks(forecast: Forecast) -> None:
     query = make_query("w|1")
     p1, p2 = patched(forecast)
     with p1 as fetch, p2:
-        await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+        await bot.on_slot_callback(slot_update(query), ctx)
     assert fetch.await_args.args[1:3] == (49.84, 24.03)
     query.message.reply_photo.assert_awaited_once()
 
     query = make_query("d|1")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     assert store.get_default(ctx.user_data).place == LVIV
     query.edit_message_text.assert_awaited_once()
 
     query = make_query("x|0")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     assert [loc.place for loc in store.list_locations(ctx.user_data)] == [LVIV]
 
     query = make_query("l|0")
-    await bot.on_slot_callback(SimpleNamespace(callback_query=query), ctx)
+    await bot.on_slot_callback(slot_update(query), ctx)
     query.message.reply_text.assert_awaited_once()
+
+
+def _slot_buttons(ctx: SimpleNamespace, owner_id: int) -> dict[str, str]:
+    _, keyboard = bot._locations_view(ctx, owner_id)
+    return {
+        button.callback_data.split("|")[0]: button.callback_data
+        for button in keyboard.inline_keyboard[0]
+    }
+
+
+async def test_slot_buttons_only_work_for_the_user_they_were_made_for() -> None:
+    """F-48: in a group, a tap on someone else's list must not change the tapper's slots."""
+    ctx = make_context()  # the tapper's own data
+    store.add_location(ctx.user_data, KYIV)
+    store.add_location(ctx.user_data, LVIV)
+    buttons = _slot_buttons(ctx, owner_id=OTHER_USER_ID)
+    assert buttons == {"w": "w|0|8", "d": "d|0|8", "x": "x|0|8"}
+
+    for data in buttons.values():
+        query = make_query(data)
+        query.message.chat.type = "group"
+        await bot.on_slot_callback(slot_update(query, USER_ID), ctx)
+        query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
+        query.edit_message_text.assert_not_awaited()
+        query.message.reply_photo.assert_not_awaited()
+    assert [loc.place for loc in store.list_locations(ctx.user_data)] == [KYIV, LVIV]
+
+    query = make_query(_slot_buttons(ctx, owner_id=USER_ID)["x"])
+    query.message.chat.type = "group"
+    await bot.on_slot_callback(slot_update(query, USER_ID), ctx)
+    assert [loc.place for loc in store.list_locations(ctx.user_data)] == [LVIV]
+
+
+async def test_untagged_slot_buttons_only_work_in_a_private_chat() -> None:
+    ctx = make_context()
+    store.add_location(ctx.user_data, KYIV)
+    query = make_query("x|0")  # a button sent before owner tags existed
+    query.message.chat.type = "supergroup"
+    await bot.on_slot_callback(slot_update(query), ctx)
+    query.answer.assert_awaited_once_with(bot.NOT_YOUR_BUTTON, show_alert=True)
+    assert len(store.list_locations(ctx.user_data)) == 1
 
 
 async def test_sun_command_and_switch_buttons(forecast: Forecast) -> None:
@@ -387,7 +444,7 @@ async def test_schedule_callbacks_and_custom_text(forecast: Forecast) -> None:
 
     query = make_query("sch|custom")
     await bot.on_schedule_callback(SimpleNamespace(callback_query=query), ctx)
-    assert ctx.user_data[bot.sched.KEY_AWAITING_TIMES] is True
+    assert bot._awaiting_times(ctx)
 
     update = make_update(text="8:00 20:00")
     update.effective_message.chat_id = 555
@@ -465,3 +522,54 @@ def test_help_privacy_text_says_what_is_kept_and_for_how_long() -> None:
         text = bot.HELP[lang]
         assert log_phrase in text and "90" in text and "/forget" in text
     assert "totals" in bot.HELP["en"] and "username" in bot.HELP["en"]
+
+
+LONG_AGO = time.time() - bot.PROMPT_TTL_SECONDS - 1
+
+
+@pytest.mark.parametrize("stale", [True, LONG_AGO])  # the pre-F-49 flag, and an expired prompt
+async def test_stale_custom_times_prompt_does_not_swallow_a_city(
+    forecast: Forecast, stale: object
+) -> None:
+    """F-49: a city typed long after "Custom times…" is a city, not a rejected time."""
+    ctx = make_context({bot.sched.KEY_AWAITING_TIMES: stale})
+    store.add_location(ctx.user_data, KYIV)
+    update = make_update(text="Lviv")
+    p1, p2 = patched(forecast)
+    with patch.object(bot, "search_place", AsyncMock(return_value=LVIV)), p1, p2:
+        await bot.on_text(update, ctx)
+    update.effective_message.reply_photo.assert_awaited_once()
+    assert bot.sched.KEY_AWAITING_TIMES not in ctx.user_data
+
+
+async def test_plain_schedule_command_leaves_the_custom_times_prompt(forecast: Forecast) -> None:
+    """F-49: the way out must not be /schedule off, which also deletes the schedule."""
+    ctx = make_context({bot.sched.KEY_AWAITING_TIMES: time.time()})
+    store.add_location(ctx.user_data, KYIV)
+    bot.sched.set_schedule(ctx.user_data, times=["07:30"], preset="morning", tz="UTC", chat_id=5)
+    ctx.user_data[bot.sched.KEY_AWAITING_TIMES] = time.time()
+
+    update = make_update(text="Lviv")
+    await bot.on_text(update, ctx)
+    hint = update.effective_message.reply_text.await_args.args[0]
+    assert "/schedule to leave" in hint and "/schedule off" not in hint
+
+    await bot.cmd_schedule(make_update(), ctx)
+    assert not bot._awaiting_times(ctx)
+    assert bot.sched.get_schedule(ctx.user_data).preset == "morning"
+
+
+@pytest.mark.parametrize("prompt", [{"alias": "home"}, {"alias": "home", "at": LONG_AGO}])
+async def test_stale_add_prompt_does_not_save_a_typed_city(
+    forecast: Forecast, prompt: dict
+) -> None:
+    """F-49: a city typed long after an unanswered /add is a one-off card, not a new slot."""
+    ctx = make_context({"awaiting_location": prompt})
+    store.add_location(ctx.user_data, KYIV)
+    update = make_update(text="Lviv")
+    p1, p2 = patched(forecast)
+    with patch.object(bot, "search_place", AsyncMock(return_value=LVIV)), p1, p2:
+        await bot.on_text(update, ctx)
+    assert [loc.place for loc in store.list_locations(ctx.user_data)] == [KYIV]
+    assert "awaiting_location" not in ctx.user_data
+    update.effective_message.reply_photo.assert_awaited_once()
