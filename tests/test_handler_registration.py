@@ -106,7 +106,7 @@ def test_unrecognised_callback_data_is_still_answered(app: Application) -> None:
 async def test_help_counts_against_the_per_user_update_budget(
     app: Application, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """F-56: /help was the one public command outside the flood limit."""
+    """F-57: /help was the one public command outside the flood limit."""
     monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=2, window=60))
     entity = MessageEntity(MessageEntity.BOT_COMMAND, 0, len("/help"))
     help_message = message(text="/help", entities=[entity])
