@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from telegram import (
@@ -17,6 +18,7 @@ from telegram import (
 from telegram.ext import Application, ApplicationBuilder
 
 from weather_bot import bot
+from weather_bot.ratelimit import RateLimiter
 
 USER = User(id=5, first_name="Ann", is_bot=False)
 
@@ -99,3 +101,25 @@ def test_unrecognised_callback_data_is_still_answered(app: Application) -> None:
         ("lang|uk", "on_lang_callback"),
     ):
         assert first_callback_handler(app, data) == expected
+
+
+async def test_help_counts_against_the_per_user_update_budget(
+    app: Application, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F-56: /help was the one public command outside the flood limit."""
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=2, window=60))
+    entity = MessageEntity(MessageEntity.BOT_COMMAND, 0, len("/help"))
+    help_message = message(text="/help", entities=[entity])
+    help_message.set_bot(SimpleNamespace(username="weatherbot"))  # type: ignore[arg-type]
+    probe = Update(update_id=1, message=help_message)
+    (handler,) = [h for h in app.handlers[0] if h.check_update(probe)]
+
+    reply = AsyncMock()
+    update = SimpleNamespace(
+        effective_user=USER,
+        effective_message=SimpleNamespace(reply_text=reply),
+        callback_query=None,
+    )
+    for _ in range(5):
+        await handler.callback(update, SimpleNamespace(user_data={}))
+    assert reply.await_count == 2

@@ -1086,7 +1086,7 @@ def register_handlers(app: App) -> None:
         ("alerts", _guarded(extra.cmd_alerts)),
         ("compare", _guarded(extra.cmd_compare, rate_limited=True)),
         ("best", _guarded(extra.cmd_best, rate_limited=True)),
-        ("help", cmd_help),
+        ("help", _guarded(cmd_help)),
     ]
     for names, callback in commands:
         # new messages only: edited messages and channel posts have no usable user_data
