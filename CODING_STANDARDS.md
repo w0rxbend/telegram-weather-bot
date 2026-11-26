@@ -37,6 +37,9 @@ machine-checked; reviewers enforce it.
   *Why:* unreferenced tasks are garbage-collected mid-run and swallow exceptions.
 - Every outbound HTTP call has a timeout (set on the shared client) and a bounded retry.
 - Handlers that mutate `user_data` run serialized per user (see `bot._guarded`).
+- A background loop treats each step's own failure as a logged event, never as the end of the
+  loop: side effects such as the heartbeat file are wrapped like the ticks are.
+  *Why:* an `OSError` from a full volume once stopped all scheduled cards until a restart.
 
 ## Errors and logging
 - No bare `except:`; `except Exception` only at a boundary (error handler, scheduler loop)
@@ -66,6 +69,12 @@ machine-checked; reviewers enforce it.
 - Handlers only react to `UpdateType.MESSAGE` (no edited messages, no channel posts).
 - Scheduled/bulk sends handle `RetryAfter` (sleep, one retry) and `Forbidden` (unsubscribe).
 - Interactive card requests are rate limited per user (`ratelimit.py`).
+- Every handler a normal user can reach is registered through `bot._guarded`, so it counts
+  against the per-user update budget. Only the admin commands are exempt.
+  ```python
+  ("help", cmd_help)            # bad: no flood limit
+  ("help", _guarded(cmd_help))  # good
+  ```
 - Echo at most a short, capped piece of user input in a reply (`MAX_QUERY_LENGTH`,
   `schedule.MAX_ECHO`). *Why:* a 4096-character message echoed inside a longer sentence is
   rejected by Telegram ("message is too long") and the user only sees the generic error.
@@ -84,6 +93,7 @@ machine-checked; reviewers enforce it.
 - Hook versions in `.pre-commit-config.yaml` follow the versions in `poetry.lock`, so a local
   run and CI agree.
 - The container runs as non-root with a read-only root filesystem.
+- The image installs from a hashed export of `poetry.lock` with `pip install --require-hashes`.
 
 ## Testing
 - `pytest` + `pytest-asyncio` (auto mode). Business logic gets unit tests; handlers are tested
