@@ -72,7 +72,7 @@ machine-checked; reviewers enforce it.
 - Every handler a normal user can reach is registered through `bot._guarded`, so it counts
   against the per-user update budget. Only the admin commands are exempt.
   ```python
-  ("help", cmd_help)            # bad: no flood limit
+  ("help", cmd_help)  # bad: no flood limit
   ("help", _guarded(cmd_help))  # good
   ```
 - Echo at most a short, capped piece of user input in a reply (`MAX_QUERY_LENGTH`,

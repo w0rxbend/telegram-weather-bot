@@ -68,9 +68,13 @@
 | F-49 | Low | `bot.py` `on_text`, `_ask_for_location`, `on_schedule_callback`, `_on_custom_times` | The `/add` and "Custom times…" prompts were stored without a time and never ended. After "Custom times…" every later text was read as times, so a city name got "not a time" for good; the reply named `/schedule off` as the way out, which also deletes the schedule. An unanswered `/add` made a city typed days later a saved slot | Prompts store when they were asked and expire after `PROMPT_TTL_SECONDS` (10 minutes, my choice). Plain `/schedule` leaves the custom-times prompt and keeps the schedule | Fixed (2026-11-19) | 45df7df |
 | F-50 | Low | `bot.py` `register_handlers` | Callback data that matched no handler pattern (a button from an older release, or forged data) was never answered, so the button's spinner ran until the client gave up | Catch-all `on_unknown_callback`, registered last, answers "This button has expired." | Fixed (2026-11-19) | 17cc09b |
 | F-51 | Low | `cache.py:24` | `FORECAST_CACHE_TTL` was parsed with `float()` at import time, outside `config.py`: a typo crashed with a bare `ValueError`, and `nan` or a negative value switched the cache off without a word | A `Settings` field validated like `HTTP_TIMEOUT`, applied in `main.build_application` | Fixed (2026-11-19) | 210202a |
-| F-52 | Low | `Dockerfile:12,34` | The image installs from `poetry export --without-hashes`, so pip does not check the downloaded packages against the hashes in `poetry.lock` | Export with hashes and `pip install --require-hashes` | **Deferred** (could not be tested here, see below) | — |
+| F-52 | Low | `Dockerfile:12,34` | The image installs from `poetry export --without-hashes`, so pip does not check the downloaded packages against the hashes in `poetry.lock` | Export with hashes and `pip install --require-hashes` | Fixed (2026-11-26; install checked on Python 3.11 and 3.13, **image not built**, see Deferred) | 8f5d0ba |
 | F-53 | Low | `weather.py:255`, `airquality.py:63`, `geocode.py:74,104` | `response.json()` accepts `NaN`, `Infinity` and `1e999` (inf). They passed `float()` in the parsers, then `round()` raised `ValueError`/`OverflowError` in `build_caption` and `AirQuality` outside the `WeatherError` handling, so the user got the generic error. A NaN coordinate from geocoding became a saved place | `httpcap.parse_json` raises `ValueError` on non-finite numbers and integers above 2**63; all four calls use it and take the existing invalid-JSON path | Fixed (2026-11-20) | 102f9e2 |
 | F-54 | Low | `schedule.py` `due_times`, `Schedule.next_run` (lines at 49f0359: :194-206, :79-95) | Slots were compared as wall-clock minutes. A time the clock skips on a spring-forward night (02:30 in `America/New_York` on 2027-03-14) never matched, so that day's card was not sent; `/schedule` showed the non-existent time as the next card | `schedule.slot_instant` compares UTC instants: a skipped time is sent just after the jump (03:30 local), a repeated autumn time once, at its first occurrence | Fixed (2026-11-21) | edc99fd |
+| F-55 | Low | `poetry.lock` (virtualenv 21.14.12, dev-only via pre-commit) | PYSEC-2026-4402 reported by pip-audit (new advisory since the last pass); not in the runtime image | `poetry update virtualenv` → 21.15.13 | Fixed (2026-11-26) | 24208c7 |
+| F-56 | Low | `scheduler.py:61` `scheduler_loop` | `health.beat` was the one step of the loop outside a `try`. An `OSError` (full or read-only data volume) ended the loop: no scheduled cards and no rain alerts until a restart, while commands kept working | The error is logged each tick and the loop goes on; the stale file still turns the healthcheck red | Fixed (2026-11-26) | f0ad517 |
+| F-57 | Low | `bot.py:1089` `register_handlers` | `/help` was the only public command registered without `_guarded`, so the 60-per-minute budget of F-44 did not cover it and one user could queue replies without limit | `_guarded(cmd_help)` | Fixed (2026-11-26) | 5177eb7 |
+| F-58 | Low | `Dockerfile:44` `HEALTHCHECK`, `docker-compose.yaml:4` | A hung bot is marked `unhealthy`, and nothing acts on that: `restart: unless-stopped` restarts a container only when its process exits. The healthcheck is a status light, not a recovery | — | **Deferred** (needs a choice on your server, see below) | — |
 
 Tooling and standards: 174be60, lock sync: see `git log`.
 
@@ -79,7 +83,8 @@ Tooling and standards: 174be60, lock sync: see `git log`.
 - **F-22 / F-23:** product/capacity decisions; see `TODO.md`.
 - **F-27 / F-28:** after the merge, open the *Docker Image CI* run on `main` and confirm the Trivy step passes. Neither fix has run in Actions; if Trivy still fails, the log names the package.
 - **F-43:** to use `/stats` and `/export` in production, add the repository secret `ADMIN_USER_IDS` (your numeric Telegram id, comma-separated for several) and redeploy. Without it nothing changes.
-- **F-52:** in `Dockerfile`, drop `--without-hashes` from the `poetry export` line and change the install to `pip install --require-hashes -r requirements.txt`, then build the image once (`docker build .`) before merging. I did not make the change: this environment has no Docker daemon and could not install `poetry-plugin-export`, so I could not produce the hashed file or prove that the image still builds, and a build that fails stops every deploy.
+- **F-52:** the change is made, but the image was not built here (no Docker daemon). After the merge, open the *Docker Image CI* run on `main` and confirm the "Build image for scanning" step passes. If it fails on a hash error, the old image keeps running (the push and deploy steps are skipped); revert 8f5d0ba to unblock deploys.
+- **F-58:** decide what should happen to an unhealthy container. Simplest: a cron line on the server, `* * * * * docker ps -q -f health=unhealthy -f name=weather-bot | xargs -r docker restart`. Alternative: an alert from your monitoring on `docker inspect --format '{{.State.Health.Status}}'`. I did not add an "autoheal" sidecar because it needs the Docker socket mounted into a container.
 - **Deploy check:** after merge, run `docker compose up -d` and confirm `docker inspect --format '{{.State.Health.Status}}' <container>` becomes `healthy`, and that the bot starts with `read_only: true`.
 
 ## Facts (verified by running)
@@ -349,3 +354,37 @@ Branch is `claude/dazzling-heisenberg-ayzcrx` (environment-assigned), not `chore
 - Not run: Docker build, Trivy, GitHub Actions (before the push), live Telegram.
 
 Branch is `claude/dazzling-heisenberg-oxjx7a` (environment-assigned), not `chore/review-hardening-2026-11-21`.
+
+## Review pass (2026-11-26)
+`main` moved once since the 2026-11-21 pass: #91 was squash-merged as 966fe31 (F-39 to F-46). The later review pull requests (#92, #98, #99, #100, #101, #104) are still open. This pass is built on `main` plus the #104 branch (c0d03f3), so it contains F-47 to F-54 and adds the commits below. Question not asked before: what can stop a background loop for good, and which public entry points bypass the limits. It re-read `main`, `runtime`, `ratelimit`, `cache`, `health`, `config`, `httpcap`, `scheduler`, `persistence`, `telemetry`, `alerts`, `bot`, `handlers_extra`, `geocode`, `identity`, `legacy_state`, the Dockerfile, the compose file and both workflows. Not re-read: the render modules, `weather`, `schedule`, `locations`, `planner`, `advice`, `sun`, `caption`, `i18n`.
+
+- The tree of 966fe31 is identical to the stack's commit ebac46a (`git diff` is empty), so the merge of #104 was resolved by taking the branch's tree.
+- Baseline on that merge (08bdedc), Python 3.11.18: `poetry run pytest -q` 357 passed; `poetry run ruff check src tests scripts` and `poetry run ruff format --check src tests scripts` clean; `poetry run mypy` strict clean (36 files); `poetry run bandit -q -c pyproject.toml -r src` rc 0; `poetry run pip-audit -r <pins from poetry show> --no-deps --disable-pip` (58 packages): **1 vulnerability** (virtualenv, F-55).
+- Final: 359 passed (2 new); ruff, ruff format, mypy (36 files), bandit clean; pip-audit: no known vulnerabilities, both on the `poetry show` pins and on `poetry export --with dev`; `poetry run pre-commit run --all-files` passes; `docker compose config -q` accepts the compose file.
+- New findings: F-55 to F-57 (Low) fixed, F-58 (Low) deferred. F-52, deferred on 2026-11-19, is now fixed. Both new tests fail without their fix (checked by stashing `scheduler.py` and `bot.py`).
+- F-52 check: in a clean venv, `pip install "poetry>=2.0,<3" poetry-plugin-export` and the Dockerfile's export command gave 12 packages with 105 hashes; `pip install --require-hashes -r` of that file succeeded on Python 3.11.18 and 3.13.18, and `import weather_bot.main` worked in both. `poetry.lock` holds hashes for the `cp314` manylinux wheels of pillow (x86_64 and aarch64). Python 3.14 is not installed here, and the image was not built.
+- Token-pattern scan (`git grep -E '[0-9]{8,10}:[A-Za-z0-9_-]{35}'`, lock file excluded) of tracked files and of the commits not yet on `main`: no matches.
+
+### Behaviour changes
+- `/help` is counted in the usage telemetry like every other command, and a user past 60 updates a minute gets no reply to it.
+- A heartbeat file that cannot be written no longer stops scheduled cards and rain alerts; it logs a warning every 30 s until the volume is writable.
+- The image build fails if a downloaded package does not match `poetry.lock`.
+
+### Checked and left as it is
+- Inline mode runs through `_guarded`, so a person who types `@bot city` in any chat gets a `users` row (id, username) in telemetry without ever opening the bot, and so never sees the privacy text in `/help`. Whether that is acceptable is your call (same question as the expiry part of F-36).
+- `/stats` and `/export` are not behind `_guarded`. They are matched only for `ADMIN_USER_IDS` and re-check the numeric id.
+- `alert_tick` can send a rain alert at any hour of the night; there are no quiet hours. Product decision.
+- The scheduler changes `user_data` without the per-user lock that handlers use. Its changes are single synchronous assignments, so they cannot interleave with a handler mid-write.
+- After `/forget`, a scheduled send already in flight for that user can write an empty row back for the user id. It holds no data.
+- The compose file sets no memory or process limit. I did not add one: a wrong number would kill a working bot, and I have no measurement of its real use.
+
+### Open pull requests
+- Merging this pass's pull request makes #92, #98, #99, #100, #101 and #104 redundant (it contains #98, #100, #101 and #104 unchanged). #92 and #99 are alternative fixes of the rain-alert problem that F-41 already fixed on `main`.
+- Dependabot #93 to #97, #102 and #103 were not reviewed. #95 moves the image to `python:3.15-slim`; CI tests 3.11, 3.13 and 3.14, so add 3.15 to both workflows before merging it. With F-52 in place, also check that its image build passes.
+
+### Assumptions and uncertainties
+- F-56 was found by reading the code; no real full-disk run was made. The test puts the heartbeat path under a missing directory, which raises the same `OSError` family.
+- F-58 rests on Docker's documented restart policies (they act on exit, not on health status). I did not run a container to watch it.
+- Not run: Docker build, Trivy, GitHub Actions (before the push), live Telegram, Open-Meteo, Nominatim.
+
+Branch is `claude/dazzling-heisenberg-vl2ct5` (environment-assigned), not `chore/review-hardening-2026-11-26`.
