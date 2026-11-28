@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from weather_bot.cache import DEFAULT_TTL
+
 TOKEN_PATTERN = re.compile(r"^\d{5,}:[\w-]{20,}$")
 
 
@@ -19,6 +21,7 @@ class Settings:
     http_timeout: float
     user_agent: str
     admin_ids: frozenset[int] = frozenset()
+    forecast_cache_ttl: float = DEFAULT_TTL  # seconds a forecast is reused per place
 
     @property
     def heartbeat_file(self) -> Path:
@@ -74,6 +77,7 @@ def load_settings() -> Settings:
         data_dir=data_dir,
         http_timeout=http_timeout,
         admin_ids=_user_ids("ADMIN_USER_IDS"),
+        forecast_cache_ttl=_positive_float("FORECAST_CACHE_TTL", str(DEFAULT_TTL)),
         user_agent=os.getenv(
             "USER_AGENT",
             "telegram-weather-bot/1.0 (+https://github.com/w0rxbend/telegram-weather-bot)",

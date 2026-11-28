@@ -10,6 +10,8 @@ permissions:
 
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot:latest
+  # Immutable tag per commit, so a bad deploy can be rolled back to a known image.
+  IMAGE_SHA: ${{ secrets.DOCKERHUB_USERNAME }}/telegram-weather-bot:${{ github.sha }}
   APP_DIR: docker-deployments/apps/bots/telegram/telegram-weather-bot
 
 jobs:
@@ -32,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify me (commit)
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -46,7 +48,7 @@ jobs:
         name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Login to Docker Hub
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -79,10 +81,12 @@ jobs:
           platforms: linux/amd64,linux/arm64/v8
           context: .
           push: true
-          tags: ${{ env.IMAGE }}
+          tags: |
+            ${{ env.IMAGE }}
+            ${{ env.IMAGE_SHA }}
           cache-from: type=gha
       - name: Notify me (image update)
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}
@@ -107,6 +111,7 @@ jobs:
         name: Connect to remote machine and deploy
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}  # passed via envs:, never pasted into the script
+          ADMIN_USER_IDS: ${{ secrets.ADMIN_USER_IDS }}  # optional; empty means no admin commands
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -114,7 +119,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
-          envs: TG_BOT_TOKEN
+          envs: TG_BOT_TOKEN,ADMIN_USER_IDS
           script: |
             export WEATHER_BOT_IMAGE=${{ env.IMAGE }}
             cd $PWD/${{ env.APP_DIR }}
@@ -122,7 +127,7 @@ jobs:
             docker compose up -d
             docker system prune -f
       - name: Notify me
-        uses: appleboy/telegram-action@390cf7345777cd821dba28c72f436a78bce19cc5 # master
+        uses: appleboy/telegram-action@68ac04bda0e0f4755e24649161566b4b6732cc83 # master
         with:
           to: ${{ secrets.TELEGRAM_NOTIFY_CHAT }}
           token: ${{ secrets.TELEGRAM_NOTIFY_TOKEN }}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from telegram.ext import AIORateLimiter
 
 from weather_bot.config import Settings
@@ -41,3 +42,20 @@ async def test_shutdown_closes_state_and_telemetry_stores(tmp_path: Path) -> Non
     finally:
         runtime.set_telemetry(None)
     assert closed == ["state", "telemetry"]
+
+
+def test_application_applies_the_configured_forecast_cache_ttl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from weather_bot.cache import forecast_cache
+
+    monkeypatch.setattr(forecast_cache(), "ttl", 3600.0)  # restored after the test
+    settings = Settings(
+        bot_token=TOKEN,
+        data_dir=tmp_path,
+        http_timeout=5.0,
+        user_agent="weather-bot-test",
+        forecast_cache_ttl=120.0,
+    )
+    build_application(settings, SqlitePersistence(tmp_path / "state.sqlite3"))
+    assert forecast_cache().ttl == 120.0
