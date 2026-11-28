@@ -24,6 +24,12 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
     PYTHONPATH=/app/src
 
+# Debian security fixes land before the python base image is rebuilt; without them the Trivy
+# gate in docker-ci.yml fails on already-fixed OS packages (e.g. libzstd1, CVE-2026-124851).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --gid 1000 userapp \
     && adduser --home /home/userapp --gid 1000 --uid 1000 --disabled-password userapp \
     && mkdir -p /data && chown userapp:userapp /data
