@@ -22,6 +22,7 @@ import contextlib
 import functools
 import logging
 import os
+import time
 import weakref
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
@@ -41,7 +42,7 @@ from telegram import (
     ReplyKeyboardRemove,
     Update,
 )
-from telegram.constants import ChatAction, ParseMode
+from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     CallbackQueryHandler,
@@ -77,7 +78,8 @@ class UnexpectedUpdateError(RuntimeError):
 
 
 KEY_UNITS = "units"
-KEY_AWAITING = "awaiting_location"  # dict {"alias": str | None} while /add or /start waits
+KEY_AWAITING = "awaiting_location"  # {"alias": str | None, "at": float} while /add waits
+PROMPT_TTL_SECONDS = 600.0  # an unanswered /add or "custom times" prompt is forgotten after this
 KEY_PLACES = "places"
 KEY_LANG_CODE = "lang_code"  # Telegram language_code, kept so background jobs can localise
 MAX_CACHED_PLACES = 5000
@@ -184,6 +186,25 @@ def _query_message(query: CallbackQuery) -> Message | None:
     return cast("Message", message)
 
 
+def _user_id(update: Update) -> int:
+    user = update.effective_user
+    if user is None:  # guarded handlers return before the callback for updates without a user
+        raise UnexpectedUpdateError("update has no user")
+    return user.id
+
+
+def _foreign_button(owner: int | None, user_id: int, message: Message) -> bool:
+    """True when a button was made for somebody else and must not act for ``user_id``.
+
+    Buttons act on the data of whoever presses them, so in a group one member's tap on
+    another member's list would change the wrong person's slots. Buttons made before owner
+    tags existed carry no owner; those are only honoured in a private chat.
+    """
+    if owner is not None:
+        return owner != user_id
+    return message.chat.type != ChatType.PRIVATE
+
+
 def _user_data(context: Context) -> dict[str, Any]:
     data = context.user_data
     if data is None:  # None only for updates without a user, which the filters exclude
@@ -262,7 +283,8 @@ def _caption(place: Place, fc: Forecast, kind: CardKind = "weather", lang: Lang 
     return build_caption(place.name, fc, lang=lang)
 
 
-def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]:
+def _locations_view(context: Context, owner_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """The slot list; its buttons are tagged with ``owner_id`` and work only for that user."""
     locs = store.list_locations(_user_data(context))
     if not locs:
         return (
@@ -279,13 +301,13 @@ def _locations_view(context: Context) -> tuple[str, InlineKeyboardMarkup | None]
             [
                 InlineKeyboardButton(
                     f"🌤 {loc.slot} · {loc.label[:20]}",
-                    callback_data=f"{CB_WEATHER_SLOT}|{loc.index}",
+                    callback_data=f"{CB_WEATHER_SLOT}|{loc.index}|{owner_id}",
                 ),
                 InlineKeyboardButton(
                     "⭐" if not loc.is_default else "✓ default",
-                    callback_data=f"{CB_DEFAULT_SLOT}|{loc.index}",
+                    callback_data=f"{CB_DEFAULT_SLOT}|{loc.index}|{owner_id}",
                 ),
-                InlineKeyboardButton("🗑", callback_data=f"{CB_REMOVE_SLOT}|{loc.index}"),
+                InlineKeyboardButton("🗑", callback_data=f"{CB_REMOVE_SLOT}|{loc.index}|{owner_id}"),
             ]
         )
     lines.append("")
@@ -326,7 +348,7 @@ async def _send_card(
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Forecast failed for %s: %s", place.name, exc)
+        log.warning("Forecast failed: %s", exc)  # no place name: alias or coordinates
         await message.reply_text(
             tr(_lang(context), "weather_down"),
             reply_markup=ReplyKeyboardRemove() if intro else None,
@@ -347,8 +369,9 @@ async def _send_card(
 
 
 async def _save_and_send(message: Message, context: Context, place: Place) -> None:
-    awaiting = _user_data(context).pop(KEY_AWAITING, None) or {}
-    alias = awaiting.get("alias") if isinstance(awaiting, dict) else None
+    prompt = _location_prompt(context) or {}
+    _user_data(context).pop(KEY_AWAITING, None)
+    alias = prompt.get("alias")
     try:
         loc, created = store.add_location(_user_data(context), place, alias)
     except ValueError as exc:
@@ -365,7 +388,35 @@ async def _save_and_send(message: Message, context: Context, place: Place) -> No
 
 
 def _ask_for_location(context: Context, alias: str | None = None) -> None:
-    _user_data(context)[KEY_AWAITING] = {"alias": alias or None}
+    _user_data(context)[KEY_AWAITING] = {"alias": alias or None, "at": time.time()}
+
+
+def _is_fresh(asked_at: object) -> bool:
+    """True for a prompt timestamp younger than ``PROMPT_TTL_SECONDS``.
+
+    Prompts stored before they carried a time (a bare ``True``, a dict without ``at``) count
+    as expired.
+    """
+    if isinstance(asked_at, bool) or not isinstance(asked_at, int | float):
+        return False
+    return 0 <= time.time() - asked_at < PROMPT_TTL_SECONDS
+
+
+def _location_prompt(context: Context) -> dict[str, Any] | None:
+    """The open /add or /start prompt; an expired one is dropped."""
+    prompt = _user_data(context).get(KEY_AWAITING)
+    if isinstance(prompt, dict) and _is_fresh(prompt.get("at")):
+        return prompt
+    _user_data(context).pop(KEY_AWAITING, None)
+    return None
+
+
+def _awaiting_times(context: Context) -> bool:
+    """True while the "custom times" prompt is open; an expired one is dropped."""
+    if _is_fresh(_user_data(context).get(sched.KEY_AWAITING_TIMES)):
+        return True
+    _user_data(context).pop(sched.KEY_AWAITING_TIMES, None)
+    return False
 
 
 # --- command handlers ---------------------------------------------------------------------
@@ -439,14 +490,14 @@ async def _send_for_slot(update: Update, context: Context, kind: CardKind) -> No
 
 async def cmd_locations(update: Update, context: Context) -> None:
     message = _message(update)
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, _user_id(update))
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 def _slot_arg(context: Context) -> tuple[int | None, str]:
     """Parse ``/cmd N [rest]`` into a 0-based index and the remaining text."""
     args = context.args or []
-    if not args or not (args[0].isascii() and args[0].isdigit()):
+    if not args or not _is_number(args[0]):
         return None, " ".join(args[1:])
     return int(args[0]) - 1, " ".join(args[1:]).strip()
 
@@ -470,7 +521,7 @@ async def cmd_remove(update: Update, context: Context) -> None:
     if loc is None:
         await message.reply_text("Usage: /remove N – see /locations for slot numbers.")
         return
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, _user_id(update))
     await message.reply_text(
         f"🗑 Removed <b>{escape(loc.label)}</b>.\n\n{text}",
         parse_mode=ParseMode.HTML,
@@ -506,15 +557,17 @@ FORGET_PROMPT = (
     "Erase everything stored about you: saved locations, schedule, units and usage statistics? "
     "This cannot be undone."
 )
+NOT_YOUR_BUTTON = "This button belongs to someone else. Send the command yourself."
 FORGET_DONE = "Done. Everything stored about you has been erased. Send /start to begin again."
 
 
 async def cmd_forget(update: Update, context: Context) -> None:
+    owner = _user_id(update)
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🗑 Erase my data", callback_data=f"{CB_FORGET}|yes"),
-                InlineKeyboardButton("Cancel", callback_data=f"{CB_FORGET}|no"),
+                InlineKeyboardButton("🗑 Erase my data", callback_data=f"{CB_FORGET}|yes|{owner}"),
+                InlineKeyboardButton("Cancel", callback_data=f"{CB_FORGET}|no|{owner}"),
             ]
         ]
     )
@@ -525,10 +578,16 @@ async def on_forget_callback(update: Update, context: Context) -> None:
     query = _callback(update)
     user = update.effective_user
     message = _query_message(query)
-    await query.answer()
-    if user is None or message is None:
+    parsed = _parse_forget_callback(query.data)
+    if user is None or message is None or parsed is None:
+        await query.answer("This button has expired. Send /forget instead.")
         return
-    if (query.data or "").endswith("|yes"):
+    confirmed, owner = parsed
+    if _foreign_button(owner, user.id, message):
+        await query.answer(NOT_YOUR_BUTTON, show_alert=True)
+        return
+    await query.answer()
+    if confirmed:
         context.application.drop_user_data(user.id)  # memory now, persisted row on this update
         if (usage := runtime.telemetry()) is not None:
             await usage.forget_user(user.id)
@@ -667,6 +726,8 @@ async def cmd_schedule(update: Update, context: Context) -> None:
         if error:
             await message.reply_text(error)
             return
+    # Plain /schedule is also the way out of the "custom times" prompt.
+    _user_data(context).pop(sched.KEY_AWAITING_TIMES, None)
     text, keyboard = _schedule_view(context)
     await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
@@ -680,7 +741,7 @@ async def on_schedule_callback(update: Update, context: Context) -> None:
         return
 
     if action == "custom":
-        _user_data(context)[sched.KEY_AWAITING_TIMES] = True
+        _user_data(context)[sched.KEY_AWAITING_TIMES] = time.time()
         await query.answer()
         await message.reply_text(
             "Send the times you want, separated by spaces, e.g. <code>7:30 13:00 19:00</code>",
@@ -716,7 +777,7 @@ async def _on_custom_times(message: Message, context: Context, text: str) -> Non
     try:
         times = sched.parse_times(text)
     except ValueError as exc:
-        await message.reply_text(f"{exc}\nOr send /schedule off to cancel.")
+        await message.reply_text(f"{exc}\nOr send /schedule to leave custom times.")
         return
     error = await _apply_schedule(message, context, times=times, preset="custom")
     if error:
@@ -753,7 +814,7 @@ async def on_text(update: Update, context: Context) -> None:
     if message.text is None:
         return
     query = message.text.strip()
-    if _user_data(context).get(sched.KEY_AWAITING_TIMES):
+    if _awaiting_times(context):
         await _on_custom_times(message, context, query)
         return
     if len(query) < 2 or len(query) > MAX_QUERY_LENGTH:
@@ -768,7 +829,7 @@ async def on_text(update: Update, context: Context) -> None:
         )
         return
 
-    setting_up = bool(_user_data(context).get(KEY_AWAITING)) or not store.list_locations(
+    setting_up = _location_prompt(context) is not None or not store.list_locations(
         _user_data(context)
     )
     if setting_up:
@@ -795,12 +856,26 @@ def _parse_callback(data: str | None) -> tuple[str, float, float] | None:
     return action, latitude, longitude
 
 
-def _parse_slot_callback(data: str | None) -> tuple[str, int] | None:
-    try:
-        action, index = (data or "").split("|")
-        return action, int(index)
-    except ValueError:
+def _is_number(text: str) -> bool:
+    return text.isascii() and text.isdigit()
+
+
+def _parse_slot_callback(data: str | None) -> tuple[str, int, int | None] | None:
+    """Split ``action|index[|owner id]``; the owner is None on buttons made before F-48."""
+    parts = (data or "").split("|")
+    if len(parts) not in (2, 3) or not all(_is_number(part) for part in parts[1:]):
         return None
+    return parts[0], int(parts[1]), int(parts[2]) if len(parts) == 3 else None
+
+
+def _parse_forget_callback(data: str | None) -> tuple[bool, int | None] | None:
+    """Split ``forget|yes|no[|owner id]`` into (confirmed, owner)."""
+    parts = (data or "").split("|")
+    if len(parts) not in (2, 3) or parts[1] not in ("yes", "no"):
+        return None
+    if len(parts) == 3 and not _is_number(parts[2]):
+        return None
+    return parts[1] == "yes", int(parts[2]) if len(parts) == 3 else None
 
 
 async def on_card_callback(update: Update, context: Context) -> None:
@@ -823,7 +898,7 @@ async def on_card_callback(update: Update, context: Context) -> None:
     try:
         png, forecast = await _build_card(place, units, kind)
     except WeatherError as exc:
-        log.warning("Refresh failed for %s: %s", place.name, exc)
+        log.warning("Refresh failed: %s", exc)  # no place name: alias or coordinates
         # The query was answered above and Telegram rejects a second answer, so tell the
         # user in the chat instead.
         await message.reply_text("Weather service is unavailable right now, try again shortly.")
@@ -858,12 +933,17 @@ async def on_slot_callback(update: Update, context: Context) -> None:
     if parsed is None or message is None:
         await query.answer("This button has expired. Send /locations instead.")
         return
-    action, index = parsed
+    action, index, owner = parsed
+    user_id = _user_id(update)
 
-    if action == CB_LIST:
+    if action == CB_LIST:  # under every card: whoever taps it gets their own list
         await query.answer()
-        text, keyboard = _locations_view(context)
+        text, keyboard = _locations_view(context, user_id)
         await message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        return
+
+    if _foreign_button(owner, user_id, message):
+        await query.answer(NOT_YOUR_BUTTON, show_alert=True)
         return
 
     if action == CB_WEATHER_SLOT:
@@ -885,12 +965,17 @@ async def on_slot_callback(update: Update, context: Context) -> None:
         await query.answer()
         return
 
-    text, keyboard = _locations_view(context)
+    text, keyboard = _locations_view(context, user_id)
     try:
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     except BadRequest as exc:
         if "not modified" not in str(exc).lower():
             raise
+
+
+async def on_unknown_callback(update: Update, context: Context) -> None:
+    """A button no handler recognises (older release, forged data): stop its spinner."""
+    await _callback(update).answer("This button has expired.")
 
 
 async def on_error(update: object, context: Context) -> None:
@@ -933,6 +1018,8 @@ async def post_shutdown(app: App) -> None:
 
 _user_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 _card_limiter = RateLimiter()
+UPDATES_PER_MINUTE = 60  # every guarded update of one user: commands, buttons, inline queries
+_update_limiter = RateLimiter(limit=UPDATES_PER_MINUTE)
 RATE_LIMITED_TEXT = "You're asking for cards too fast. Please wait a minute and try again."
 
 Handler = Callable[[Update, Context], Coroutine[Any, Any, None]]
@@ -940,6 +1027,9 @@ Handler = Callable[[Update, Context], Coroutine[Any, Any, None]]
 
 def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
     """Run ``callback`` one update at a time per user, optionally rate limited.
+
+    Every guarded update counts against ``UPDATES_PER_MINUTE``; ``rate_limited`` adds the
+    much tighter card budget on top.
 
     PTB runs updates concurrently; two quick taps from one user would otherwise interleave
     their read-modify-write of ``user_data`` (slots, schedule).
@@ -949,6 +1039,12 @@ def _guarded(callback: Handler, *, rate_limited: bool = False) -> Handler:
     async def wrapper(update: Update, context: Context) -> None:
         user = update.effective_user
         if user is None:
+            return
+        if not _update_limiter.allow(user.id):
+            # A flood: drop it without a reply, a telemetry row or a lock. Only a button gets
+            # an (empty) answer, so its spinner stops.
+            if update.callback_query:
+                await update.callback_query.answer()
             return
         if rate_limited and not _card_limiter.allow(user.id):
             if update.callback_query:
@@ -990,7 +1086,7 @@ def register_handlers(app: App) -> None:
         ("alerts", _guarded(extra.cmd_alerts)),
         ("compare", _guarded(extra.cmd_compare, rate_limited=True)),
         ("best", _guarded(extra.cmd_best, rate_limited=True)),
-        ("help", cmd_help),
+        ("help", _guarded(cmd_help)),
     ]
     for names, callback in commands:
         # new messages only: edited messages and channel posts have no usable user_data
@@ -1033,5 +1129,7 @@ def register_handlers(app: App) -> None:
             _guarded(extra.on_lang_callback), pattern=rf"^{extra.CB_LANG}\|(en|uk)$"
         )
     )
+    # last in the group, so it only sees callback data that matched nothing above
+    app.add_handler(CallbackQueryHandler(_guarded(on_unknown_callback)))
     app.add_handler(InlineQueryHandler(_guarded(extra.on_inline_query)))  # own limiter inside
     app.add_error_handler(on_error)

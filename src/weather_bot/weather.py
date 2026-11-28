@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import httpx
 
-from weather_bot.httpcap import get_capped
+from weather_bot.httpcap import get_capped, parse_json
 from weather_bot.privacy import describe_error
 
 Units = Literal["metric", "imperial"]
@@ -252,7 +252,7 @@ async def fetch_forecast(
                 await asyncio.sleep(RETRY_DELAYS[attempt])
                 continue
             response.raise_for_status()
-            payload = response.json()
+            payload = parse_json(response)
             break
         except httpx.TransportError as exc:
             last_error = exc
@@ -271,6 +271,8 @@ async def fetch_forecast(
     else:  # pragma: no cover - loop always breaks or raises
         raise WeatherError(f"Open-Meteo request failed: {last_error}")
 
+    if not isinstance(payload, dict):
+        raise WeatherError("Open-Meteo returned an unexpected payload")
     if "error" in payload and payload.get("error"):
         raise WeatherError(payload.get("reason", "Open-Meteo returned an error"))
 

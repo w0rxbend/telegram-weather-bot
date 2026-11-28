@@ -1,5 +1,5 @@
 # ---- builder: turn poetry.lock into a pinned requirements.txt ------------------------------
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -9,11 +9,12 @@ RUN pip install "poetry>=2.0,<3" poetry-plugin-export
 
 WORKDIR /build
 COPY pyproject.toml poetry.lock ./
-RUN poetry export -f requirements.txt --without-hashes -o requirements.txt
+# With hashes, so the runtime stage installs exactly the files poetry.lock names.
+RUN poetry export -f requirements.txt -o requirements.txt
 
 
 # ---- runtime -------------------------------------------------------------------------------
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 # Unbuffered logs, no .pyc clutter, state in a mountable volume.
 ENV PYTHONUNBUFFERED=1 \
@@ -23,6 +24,12 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
     PYTHONPATH=/app/src
 
+# Debian security fixes land before the python base image is rebuilt; without them the Trivy
+# gate in docker-ci.yml fails on already-fixed OS packages (e.g. libzstd1, CVE-2026-124851).
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --gid 1000 userapp \
     && adduser --home /home/userapp --gid 1000 --uid 1000 --disabled-password userapp \
     && mkdir -p /data && chown userapp:userapp /data
@@ -31,7 +38,7 @@ WORKDIR /app
 COPY --from=builder /build/requirements.txt ./requirements.txt
 # pip is not needed at runtime, and its vendored copies of certifi, urllib3, msgpack and
 # setuptools are what the Trivy gate in docker-ci.yml flags; drop it once the deps are in.
-RUN pip install -r requirements.txt \
+RUN pip install --require-hashes -r requirements.txt \
     && pip uninstall -y pip
 
 COPY src/ ./src

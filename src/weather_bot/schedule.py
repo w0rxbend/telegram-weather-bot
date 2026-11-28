@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import MutableMapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -21,6 +21,7 @@ KEY_SCHEDULE = "schedule"
 KEY_AWAITING_TIMES = "awaiting_schedule_times"
 
 MAX_TIMES = 24
+MAX_ECHO = 20  # characters of a rejected token repeated in the error message
 GRACE = timedelta(minutes=10)  # a slot still fires if the bot was busy/down for up to this long
 
 UserData = MutableMapping[str, Any]
@@ -85,18 +86,31 @@ class Schedule:
             if self.days == "weekdays" and day.weekday() >= 5:
                 continue
             for t in self.times:
-                hh, mm = (int(x) for x in t.split(":"))
-                candidate = datetime.combine(day, datetime.min.time(), tzinfo=self.zone).replace(
-                    hour=hh, minute=mm
-                )
+                candidate = slot_instant(day, t, self.zone).astimezone(self.zone)
                 if candidate > local:
                     return candidate
         return None
 
 
+def slot_instant(day: date, slot: str, zone: ZoneInfo) -> datetime:
+    """The UTC instant of an "HH:MM" slot on a local date.
+
+    A wall-clock time skipped by a daylight-saving jump (02:30 on a spring-forward night)
+    maps to the moment after the jump, so the card is sent late instead of not at all.
+    A time that occurs twice (autumn) maps to its first occurrence.
+    """
+    hh, mm = (int(x) for x in slot.split(":"))
+    return datetime.combine(day, time(hh, mm), tzinfo=zone).astimezone(UTC)
+
+
 # --- parsing -----------------------------------------------------------------------------
 
 _TIME_RE = re.compile(r"^(\d{1,2})(?:[:h.](\d{2}))?$")
+
+
+def _shown(token: str) -> str:
+    """The token as echoed to the user: capped, so the reply cannot outgrow a message."""
+    return token if len(token) <= MAX_ECHO else token[: MAX_ECHO - 1] + "…"
 
 
 def parse_times(text: str) -> list[str]:
@@ -111,10 +125,10 @@ def parse_times(text: str) -> list[str]:
     for token in tokens:
         m = _TIME_RE.match(token.lower())
         if not m:
-            raise ValueError(f"“{token}” is not a time. Use HH:MM, e.g. 7:30 13:00 19:00")
+            raise ValueError(f"“{_shown(token)}” is not a time. Use HH:MM, e.g. 7:30 13:00 19:00")
         hh, mm = int(m.group(1)), int(m.group(2) or 0)
         if not (0 <= hh <= 23 and 0 <= mm <= 59):
-            raise ValueError(f"“{token}” is not a valid time of day")
+            raise ValueError(f"“{_shown(token)}” is not a valid time of day")
         times.add(f"{hh:02d}:{mm:02d}")
     if len(times) > MAX_TIMES:
         raise ValueError(f"That is too many times; the limit is {MAX_TIMES} per day")
@@ -192,14 +206,13 @@ def due_times(user_data: UserData, now_utc: datetime) -> list[str]:
     today = local.date().isoformat()
     last = user_data[KEY_SCHEDULE].get("last") or {}
     sent = set(last.get("sent", [])) if last.get("date") == today else set()
-    now_minutes = local.hour * 60 + local.minute
+    this_minute = now_utc.astimezone(UTC).replace(second=0, microsecond=0)
     due = []
     for t in sched.times:
         if t in sent:
             continue
-        hh, mm = (int(x) for x in t.split(":"))
-        start = hh * 60 + mm
-        if start <= now_minutes <= start + GRACE.total_seconds() / 60:
+        start = slot_instant(local.date(), t, sched.zone)
+        if start <= this_minute <= start + GRACE:
             due.append(t)
     return due
 

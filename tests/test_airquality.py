@@ -58,3 +58,12 @@ async def test_fetch_failure_does_not_leak_the_url() -> None:
         with pytest.raises(WeatherError) as info:
             await fetch_air_quality(client, 50.45, 30.52)
     assert "50.45" not in str(info.value)
+
+
+async def test_fetch_rejects_non_finite_aqi() -> None:
+    # round(inf) raised OverflowError past the WeatherError handling in /air (F-53)
+    body = b'{"current": {"european_aqi": 1e999, "pm2_5": 4.0, "pm10": 7.0}}'
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(WeatherError, match="invalid JSON"):
+            await fetch_air_quality(client, 50.45, 30.52)

@@ -199,7 +199,7 @@ async def test_vanished_chat_loses_rain_alerts(forecast: Forecast) -> None:
     assert alerts.chat_id_for(data) is None
 
 
-async def test_other_bad_request_keeps_rain_alerts(forecast: Forecast) -> None:
+async def test_other_bad_requests_keep_rain_alerts(forecast: Forecast) -> None:
     app, data = alert_app(forecast)
     app.bot.send_message = AsyncMock(side_effect=BadRequest("Can't parse entities"))
     with patch("weather_bot.scheduler.cached_forecast", AsyncMock(return_value=rainy(forecast))):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,3 +42,28 @@ async def test_scheduler_loop_beats_even_when_tick_fails(tmp_path: Path) -> None
     await asyncio.sleep(0.05)
     task.cancel()
     assert path.exists()
+
+
+async def test_scheduler_loop_survives_a_failing_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticks = 0
+
+    async def count_tick(app: object) -> int:
+        nonlocal ticks
+        ticks += 1
+        return 0
+
+    monkeypatch.setattr(scheduler, "tick", count_tick)
+    monkeypatch.setattr(scheduler, "alert_tick", count_tick)
+    # A directory where the file should be: touch() raises an OSError, as a full disk would.
+    blocked = tmp_path / "missing-dir" / "heartbeat"
+    task = asyncio.create_task(
+        scheduler.scheduler_loop(SimpleNamespace(), interval=0.01, heartbeat=blocked)
+    )
+    await asyncio.sleep(0.1)
+    assert not task.done()  # before the fix the first OSError ended the loop for good
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert ticks > 2

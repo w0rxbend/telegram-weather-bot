@@ -32,3 +32,12 @@ def _stub_http_client():
     )
     yield
     runtime.set_http(None)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_update_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-user update budget is process-wide; one test must not use up another's."""
+    from weather_bot import bot
+    from weather_bot.ratelimit import RateLimiter
+
+    monkeypatch.setattr(bot, "_update_limiter", RateLimiter(limit=bot.UPDATES_PER_MINUTE))
